@@ -133,8 +133,8 @@ function App() {
     }
 
     window.addEventListener('message', handleMessage)
+    announceReady()
     if (window.parent !== window) {
-      announceReady()
       readyTimer = window.setInterval(() => {
         if (!initialized) announceReady()
       }, 1000)
