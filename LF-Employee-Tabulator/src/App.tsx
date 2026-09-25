@@ -114,6 +114,9 @@ function App() {
     }
 
     window.addEventListener('message', handleMessage)
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'employee-tabulator:ready' }, LASERFICHE_ORIGIN)
+    }
     return () => window.removeEventListener('message', handleMessage)
   }, [])
 
