@@ -51,4 +51,6 @@ On **Save changes**, the iframe posts this payload to its parent:
 }
 ```
 
-Each list contains only records changed in that category. Row-lock state is returned as `locked`. Internal table identifiers are omitted. For security, messages are accepted only from the parent frame and from `https://app.laserfiche.com`, `https://app.laserfiche.ca`, `https://sandbox-forms.laserfiche.com`, `https://sandbox-forms.laserfiche.ca`, or the page's own origin. The response is posted to the origin that sent the initialization message. The ready handshake is sent to the supported Laserfiche app and sandbox origins.
+Each list contains only records changed in that category. Row-lock state is returned as `locked`. Internal table identifiers are omitted.
+
+**Temporary proof-of-concept messaging:** the page currently accepts supported init-shaped messages from any sender, sends the ready handshake with target origin `*`, and retries that handshake once per second until initialization succeeds. Replies go to the origin that sent the init message (or `*` for an opaque origin). This permissive mode is only for initial connectivity testing; restore strict origin and source validation before production use.

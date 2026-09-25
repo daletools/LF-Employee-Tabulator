@@ -16,12 +16,6 @@ type ChangeSet = {
   deleted: Record<string, unknown>[]
 }
 
-const LASERFICHE_ORIGINS = [
-  'https://app.laserfiche.com',
-  'https://app.laserfiche.ca',
-  'https://sandbox-forms.laserfiche.com',
-  'https://sandbox-forms.laserfiche.ca',
-]
 const INTERNAL_PREFIX = '__lf'
 
 function normalizeColumns(columns: unknown[]): ColumnDefinition[] {
@@ -50,7 +44,7 @@ function toPublicRow(row: EmployeeRow): Record<string, unknown> {
 function App() {
   const tableElement = useRef<HTMLDivElement>(null)
   const table = useRef<Tabulator | null>(null)
-  const targetOrigin = useRef(LASERFICHE_ORIGINS[0])
+  const targetOrigin = useRef('*')
   const addedRows = useRef(new Map<string, EmployeeRow>())
   const updatedRows = useRef(new Map<string, EmployeeRow>())
   const deletedRows = useRef(new Map<string, Record<string, unknown>>())
@@ -72,11 +66,26 @@ function App() {
   }
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const allowedOrigins = new Set([...LASERFICHE_ORIGINS, window.location.origin])
-      if (event.source !== window.parent || !allowedOrigins.has(event.origin)) return
+    let initialized = false
+    let readyTimer: number | undefined
 
+    const announceReady = () => {
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'employee-tabulator:ready' }, '*')
+      }
+    }
+
+    const handleMessage = (event: MessageEvent) => {
       const data = event.data
+      if (
+        data &&
+        typeof data === 'object' &&
+        'type' in data &&
+        data.type !== 'employee-tabulator:init'
+      ) {
+        return
+      }
+
       let incomingColumns: unknown[] | undefined
       let incomingRows: unknown[] | undefined
 
@@ -106,7 +115,9 @@ function App() {
         __lfLocked: true,
       })) as EmployeeRow[]
 
-      targetOrigin.current = event.origin
+      initialized = true
+      targetOrigin.current = event.origin === 'null' ? '*' : event.origin
+      if (readyTimer !== undefined) window.clearInterval(readyTimer)
       addedRows.current.clear()
       updatedRows.current.clear()
       deletedRows.current.clear()
@@ -120,11 +131,15 @@ function App() {
 
     window.addEventListener('message', handleMessage)
     if (window.parent !== window) {
-      for (const origin of LASERFICHE_ORIGINS) {
-        window.parent.postMessage({ type: 'employee-tabulator:ready' }, origin)
-      }
+      announceReady()
+      readyTimer = window.setInterval(() => {
+        if (!initialized) announceReady()
+      }, 1000)
     }
-    return () => window.removeEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      if (readyTimer !== undefined) window.clearInterval(readyTimer)
+    }
   }, [])
 
   useEffect(() => {
