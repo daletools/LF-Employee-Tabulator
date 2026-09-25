@@ -51,4 +51,4 @@ On **Save changes**, the iframe posts this payload to its parent:
 }
 ```
 
-Each list contains only records changed in that category. Row-lock state is returned as `locked`. Internal table identifiers are omitted. For security, messages are accepted only from the parent frame and from `https://sandbox-forms.laserfiche.com`, `https://sandbox-forms.laserfiche.ca`, or the page's own origin. The response is posted to the origin that sent the initialization message. The ready handshake is sent to both Laserfiche sandbox region origins.
+Each list contains only records changed in that category. Row-lock state is returned as `locked`. Internal table identifiers are omitted. For security, messages are accepted only from the parent frame and from `https://app.laserfiche.com`, `https://app.laserfiche.ca`, `https://sandbox-forms.laserfiche.com`, `https://sandbox-forms.laserfiche.ca`, or the page's own origin. The response is posted to the origin that sent the initialization message. The ready handshake is sent to the supported Laserfiche app and sandbox origins.

@@ -17,6 +17,8 @@ type ChangeSet = {
 }
 
 const LASERFICHE_ORIGINS = [
+  'https://app.laserfiche.com',
+  'https://app.laserfiche.ca',
   'https://sandbox-forms.laserfiche.com',
   'https://sandbox-forms.laserfiche.ca',
 ]
