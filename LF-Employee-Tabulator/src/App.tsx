@@ -71,8 +71,10 @@ function App() {
 
     const announceReady = () => {
       if (window.parent !== window) {
+        console.log("submitting postMessage")
         window.parent.postMessage({ type: 'employee-tabulator:ready' }, '*')
-      }
+      } else {
+       console.log("Running in a window") 
     }
 
     const handleMessage = (event: MessageEvent) => {
