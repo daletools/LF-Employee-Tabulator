@@ -11,6 +11,12 @@ npm run dev
 
 Use **Preview with 3,000 sample records** to exercise the grid without a form.
 
+## Deploy to GitHub Pages
+
+The repository includes a GitHub Actions deployment workflow. In GitHub, open **Settings → Pages** and set **Build and deployment → Source** to **GitHub Actions**. Push the `main` branch or run **Deploy to GitHub Pages** from the Actions tab to publish the site.
+
+The live site URL is <https://daletools.github.io/LF-Employee-Tabulator/>. The workflow installs from this app's lockfile, builds the Vite site with the `/LF-Employee-Tabulator/` base path, and deploys the build artifact. Local development continues to use `/`.
+
 ## Iframe message contract
 
 Send the initial data from the parent frame after the iframe has loaded. The page accepts this object shape, `{ columns, rows }`, or the aliases `{ columns, data }` and `[columns, rows]`:
