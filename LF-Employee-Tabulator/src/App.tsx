@@ -16,7 +16,10 @@ type ChangeSet = {
   deleted: Record<string, unknown>[]
 }
 
-const LASERFICHE_ORIGIN = 'https://sandbox-forms.laserfiche.com'
+const LASERFICHE_ORIGINS = [
+  'https://sandbox-forms.laserfiche.com',
+  'https://sandbox-forms.laserfiche.ca',
+]
 const INTERNAL_PREFIX = '__lf'
 
 function normalizeColumns(columns: unknown[]): ColumnDefinition[] {
@@ -45,7 +48,7 @@ function toPublicRow(row: EmployeeRow): Record<string, unknown> {
 function App() {
   const tableElement = useRef<HTMLDivElement>(null)
   const table = useRef<Tabulator | null>(null)
-  const targetOrigin = useRef(LASERFICHE_ORIGIN)
+  const targetOrigin = useRef(LASERFICHE_ORIGINS[0])
   const addedRows = useRef(new Map<string, EmployeeRow>())
   const updatedRows = useRef(new Map<string, EmployeeRow>())
   const deletedRows = useRef(new Map<string, Record<string, unknown>>())
@@ -68,7 +71,7 @@ function App() {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const allowedOrigins = new Set([LASERFICHE_ORIGIN, window.location.origin])
+      const allowedOrigins = new Set([...LASERFICHE_ORIGINS, window.location.origin])
       if (event.source !== window.parent || !allowedOrigins.has(event.origin)) return
 
       const data = event.data
@@ -115,7 +118,9 @@ function App() {
 
     window.addEventListener('message', handleMessage)
     if (window.parent !== window) {
-      window.parent.postMessage({ type: 'employee-tabulator:ready' }, LASERFICHE_ORIGIN)
+      for (const origin of LASERFICHE_ORIGINS) {
+        window.parent.postMessage({ type: 'employee-tabulator:ready' }, origin)
+      }
     }
     return () => window.removeEventListener('message', handleMessage)
   }, [])
