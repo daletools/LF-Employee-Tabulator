@@ -388,6 +388,11 @@ function debounce(func, delay = 500) {
   };
 }
 
+/* ============================================================================
+ * HOSTED EMPLOYEE / FLIGHT TABULATOR BRIDGE
+ * This section owns iframe discovery, employee/flight payload mapping, and
+ * writing saved flight assignments or deletion markers back into LFForm.
+ * ========================================================================== */
 function toTabulatorData(input) {
   const records = Array.isArray(input) ? input : [input];
 
@@ -676,3 +681,5 @@ window.addEventListener("message", (event) => {
     data: event.data,
   });
 });
+
+/* ================= END HOSTED EMPLOYEE / FLIGHT TABULATOR BRIDGE ============ */

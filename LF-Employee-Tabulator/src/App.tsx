@@ -14,6 +14,71 @@ type ChangeSet = {
   flights: Record<string, unknown>[]
 }
 
+const FLIGHT_FIELDS = [
+  'Flight_Number',
+  'Flight_Carrier',
+  'Flight_Origin',
+  'Flight_Destination',
+  'Flight_Date',
+  'Flight_Time',
+  'Flight_Type',
+] as const
+const FLIGHT_DEFINITION_FIELDS = FLIGHT_FIELDS.filter((field) => field !== 'Flight_Number')
+
+function flightSnapshot(row: EmployeeRow): string {
+  return JSON.stringify(FLIGHT_FIELDS.map((field) => row[field] ?? ''))
+}
+
+function flightDefinition(row: EmployeeRow): Record<string, unknown> {
+  return Object.fromEntries(
+    FLIGHT_DEFINITION_FIELDS.map((field) => [field, row[field] ?? '']),
+  )
+}
+
+function laserTimeToInput(value: string): string {
+  const match = value.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i)
+  if (!match) return value.slice(0, 5)
+  let hours = Number(match[1]) % 12
+  if (match[3].toUpperCase() === 'PM') hours += 12
+  return `${String(hours).padStart(2, '0')}:${match[2]}`
+}
+
+function inputTimeToLaser(value: string): string {
+  const [rawHours, minutes] = value.split(':')
+  if (rawHours === undefined || minutes === undefined) return ''
+  const hours = Number(rawHours)
+  const suffix = hours >= 12 ? 'PM' : 'AM'
+  const displayHours = hours % 12 || 12
+  return `${String(displayHours).padStart(2, '0')}:${minutes}:00 ${suffix}`
+}
+
+function dateForGrid(value: unknown): string {
+  if (value && typeof value === 'object' && 'dateStr' in value) {
+    return String(value.dateStr ?? '')
+  }
+  return typeof value === 'string' ? value.split('T')[0] : ''
+}
+
+function timeForGrid(value: unknown): string {
+  if (value && typeof value === 'object' && 'timeStr' in value) {
+    return laserTimeToInput(String(value.timeStr ?? ''))
+  }
+  if (typeof value === 'string' && value.includes('T')) {
+    return value.split('T')[1].slice(0, 5)
+  }
+  return ''
+}
+
+function dateTimeForLaser(date: unknown, time: unknown): Record<string, string> | '' {
+  const dateStr = String(date ?? '')
+  const timeValue = String(time ?? '')
+  if (!dateStr) return ''
+  return {
+    dateStr,
+    ...(timeValue ? { timeStr: inputTimeToLaser(timeValue) } : {}),
+  }
+}
+
 const GRID_COLUMNS: ColumnDefinition[] = [
   { title: 'Employee number', field: 'Employee_Number', width: 145, editable: false },
   { title: 'Full name', field: 'FullName', width: 190, editable: false },
@@ -22,7 +87,8 @@ const GRID_COLUMNS: ColumnDefinition[] = [
   { title: 'Carrier', field: 'Flight_Carrier', width: 145 },
   { title: 'Origin', field: 'Flight_Origin', width: 130 },
   { title: 'Destination', field: 'Flight_Destination', width: 145 },
-  { title: 'Flight date', field: 'Flight_Date', width: 150, editor: 'date' },
+  { title: 'Flight date', field: 'Flight_Date', width: 145, editor: 'date' },
+  { title: 'Flight time', field: 'Flight_Time', width: 125, editor: 'time' },
   {
     title: 'Flight type',
     field: 'Flight_Type',
@@ -51,18 +117,11 @@ function columnsForFlights(flights: Record<string, unknown>[]): ColumnDefinition
             allowEmpty: true,
             emptyValue: '',
             clearable: true,
-            freetext: false,
+            freetext: true,
           },
         }
       : column,
   )
-}
-
-function dateForGrid(value: unknown): string {
-  if (value && typeof value === 'object' && 'dateStr' in value) {
-    return String(value.dateStr ?? '')
-  }
-  return typeof value === 'string' ? value.slice(0, 10) : ''
 }
 
 function buildGridRows(employees: Record<string, unknown>[], flights: Record<string, unknown>[]): EmployeeRow[] {
@@ -83,9 +142,6 @@ function buildGridRows(employees: Record<string, unknown>[], flights: Record<str
     const employeeFlights = flightsByEmployee.get(employeeNumber) ?? [{}]
     for (const flight of employeeFlights) {
       const flightDate = flight.Flight_Date
-      const dateTime = flightDate && typeof flightDate === 'object'
-        ? flightDate as { dateStr?: string; timeStr?: string }
-        : undefined
       rows.push({
         Employee_Number: employeeNumber,
         FullName: employee.FullName ?? employee.fullName ?? '',
@@ -95,8 +151,8 @@ function buildGridRows(employees: Record<string, unknown>[], flights: Record<str
         Flight_Origin: flight.Flight_Origin ?? '',
         Flight_Destination: flight.Flight_Destination ?? '',
         Flight_Date: dateForGrid(flightDate),
+        Flight_Time: timeForGrid(flightDate),
         Flight_Type: flight.Flight_Type ?? '',
-        __lfFlightTime: dateTime?.timeStr ?? '',
         __lfRowId: `flight-${rows.length}`,
         __lfLocked: true,
         __lfNew: false,
@@ -107,21 +163,13 @@ function buildGridRows(employees: Record<string, unknown>[], flights: Record<str
 }
 
 function toFlightPayload(row: EmployeeRow): Record<string, unknown> {
-  const dateStr = String(row.Flight_Date ?? '')
-  const flightDate = dateStr
-    ? {
-        dateStr,
-        ...(row.__lfFlightTime ? { timeStr: row.__lfFlightTime } : {}),
-      }
-    : ''
-
   return {
     Employee_Number: row.Employee_Number,
     Flight_Number: row.Flight_Number,
     Flight_Carrier: row.Flight_Carrier,
     Flight_Origin: row.Flight_Origin,
     Flight_Destination: row.Flight_Destination,
-    Flight_Date: flightDate,
+    Flight_Date: dateTimeForLaser(row.Flight_Date, row.Flight_Time),
     Flight_Type: row.Flight_Type,
   }
 }
@@ -132,6 +180,7 @@ function App() {
   const formWindow = useRef<Window | null>(null)
   const targetOrigin = useRef('*')
   const flightDefinitions = useRef(new Map<string, Record<string, unknown>>())
+  const originalRows = useRef(new Map<string, string>())
   const updatedRows = useRef(new Map<string, EmployeeRow>())
   const [columns, setColumns] = useState<ColumnDefinition[]>([])
   const [rows, setRows] = useState<EmployeeRow[]>([])
@@ -143,9 +192,57 @@ function App() {
   const [saveNotice, setSaveNotice] = useState('')
 
   function trackUpdate(row: EmployeeRow) {
-    updatedRows.current.set(row.__lfRowId, row)
+    const original = originalRows.current.get(row.__lfRowId)
+    if (original !== undefined && original === flightSnapshot(row)) {
+      updatedRows.current.delete(row.__lfRowId)
+    } else {
+      updatedRows.current.set(row.__lfRowId, row)
+    }
     setSaveNotice('')
     setChangeCount(updatedRows.current.size)
+  }
+
+  function matchingFlightRows(flightNumber: string, exceptRowId?: string): RowComponent[] {
+    const grid = table.current
+    if (!grid || !flightNumber) return []
+
+    return grid.getData()
+      .filter((data) =>
+        String(data.Flight_Number ?? '') === flightNumber && data.__lfRowId !== exceptRowId,
+      )
+      .map((data) => grid.getRow(data.__lfRowId))
+      .filter((row): row is RowComponent => Boolean(row))
+  }
+
+  function updateFlightDefinition(flightNumber: string, row: EmployeeRow) {
+    if (flightNumber) {
+      flightDefinitions.current.set(flightNumber, {
+        Flight_Number: flightNumber,
+        ...flightDefinition(row),
+      })
+    }
+  }
+
+  function clearFlightDefinition(row: RowComponent) {
+    row.update({
+      Flight_Carrier: '',
+      Flight_Origin: '',
+      Flight_Destination: '',
+      Flight_Date: '',
+      Flight_Time: '',
+      Flight_Type: '',
+    })
+  }
+
+  function fillFlightDefinition(row: RowComponent, definition: Record<string, unknown>) {
+    row.update({
+      Flight_Carrier: definition.Flight_Carrier ?? '',
+      Flight_Origin: definition.Flight_Origin ?? '',
+      Flight_Destination: definition.Flight_Destination ?? '',
+      Flight_Date: dateForGrid(definition.Flight_Date),
+      Flight_Time: timeForGrid(definition.Flight_Date),
+      Flight_Type: definition.Flight_Type ?? '',
+    })
   }
 
   useEffect(() => {
@@ -204,6 +301,10 @@ function App() {
 
       targetOrigin.current = event.origin === 'null' ? '*' : event.origin
       if (event.source) formWindow.current = event.source as Window
+      originalRows.current = new Map(
+        normalizedRows.map((row) => [row.__lfRowId, flightSnapshot(row)]),
+      )
+      updatedRows.current.clear()
       setChangeCount(0)
       setColumns(columnsForFlights(flightRows))
       setRows(normalizedRows)
@@ -260,33 +361,40 @@ function App() {
 
     grid.on('cellEdited', (cell: CellComponent) => {
       const row = cell.getRow()
-      if (cell.getField() === 'Flight_Number') {
+      const field = String(cell.getField())
+      if (field === 'Flight_Number') {
+        const oldFlightNumber = String(cell.getOldValue() ?? '')
         const flightNumber = String(cell.getValue() ?? '')
         const definition = flightDefinitions.current.get(flightNumber)
+        const targets = oldFlightNumber && oldFlightNumber !== flightNumber
+          ? matchingFlightRows(oldFlightNumber, row.getData().__lfRowId)
+          : []
+        const affectedRows = [row, ...targets]
+
+        for (const target of targets) target.update({ Flight_Number: flightNumber })
         if (!flightNumber) {
-          row.update({
-            Flight_Carrier: '',
-            Flight_Origin: '',
-            Flight_Destination: '',
-            Flight_Date: '',
-            Flight_Type: '',
-            __lfFlightTime: '',
-          })
+          for (const target of affectedRows) clearFlightDefinition(target)
         } else if (definition) {
-          const dateTime = definition.Flight_Date && typeof definition.Flight_Date === 'object'
-            ? definition.Flight_Date as { dateStr?: string; timeStr?: string }
-            : undefined
-          row.update({
-            Flight_Carrier: definition.Flight_Carrier ?? '',
-            Flight_Origin: definition.Flight_Origin ?? '',
-            Flight_Destination: definition.Flight_Destination ?? '',
-            Flight_Date: dateForGrid(definition.Flight_Date),
-            Flight_Type: definition.Flight_Type ?? '',
-            __lfFlightTime: dateTime?.timeStr ?? '',
-          })
+          for (const target of affectedRows) fillFlightDefinition(target, definition)
+        } else {
+          for (const target of affectedRows) clearFlightDefinition(target)
+          updateFlightDefinition(flightNumber, row.getData() as EmployeeRow)
         }
+        for (const target of affectedRows) trackUpdate(target.getData() as EmployeeRow)
+        return
       }
-      trackUpdate(row.getData() as EmployeeRow)
+
+      const rowData = row.getData() as EmployeeRow
+      const flightNumber = String(rowData.Flight_Number ?? '')
+      if (flightNumber && (FLIGHT_DEFINITION_FIELDS as readonly string[]).includes(field)) {
+        const updates = { [field]: rowData[field] }
+        for (const target of matchingFlightRows(flightNumber, rowData.__lfRowId)) {
+          target.update(updates)
+          trackUpdate(target.getData() as EmployeeRow)
+        }
+        updateFlightDefinition(flightNumber, rowData)
+      }
+      trackUpdate(rowData)
     })
     grid.on('rowAdded', () => setRowCount(grid.getDataCount()))
     grid.on('rowDeleted', () => setRowCount(grid.getDataCount()))
@@ -298,7 +406,16 @@ function App() {
   }, [columns, ready, rows])
 
   function saveChanges() {
-    const changedRows = [...updatedRows.current.values()]
+    const changedRows = [...updatedRows.current.values()].filter((row) => {
+      const original = originalRows.current.get(row.__lfRowId)
+      return original === undefined || original !== flightSnapshot(row)
+    })
+    for (const rowId of updatedRows.current.keys()) {
+      if (!changedRows.some((row) => row.__lfRowId === rowId)) {
+        updatedRows.current.delete(rowId)
+      }
+    }
+    setChangeCount(changedRows.length)
     const invalidRows = changedRows.filter((row) => {
       const deletionMarker = [
         row.Flight_Number,
@@ -306,6 +423,7 @@ function App() {
         row.Flight_Origin,
         row.Flight_Destination,
         row.Flight_Date,
+        row.Flight_Time,
         row.Flight_Type,
       ].every((value) => value == null || value === '')
       return !row.Employee_Number ||
@@ -347,6 +465,10 @@ function App() {
     setColumns(columnsForFlights(flights))
     targetOrigin.current = window.location.origin
     const sampleRows = buildGridRows(employees, flights)
+    originalRows.current = new Map(
+      sampleRows.map((row) => [row.__lfRowId, flightSnapshot(row)]),
+    )
+    updatedRows.current.clear()
     setRows(sampleRows)
     setRowCount(sampleRows.length)
     setReady(true)
