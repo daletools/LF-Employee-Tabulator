@@ -66,20 +66,20 @@ function App() {
   }
 
   useEffect(() => {
-    let initialized = false
-    let readyTimer: number | undefined
-
-    const announceReady = () => {
-      if (window.parent !== window) {
-        console.log("submitting postMessage")
-        window.parent.postMessage({ type: 'employee-tabulator:ready' }, '*')
-      } else {
-        console.log('Running in a window')
-      }
-    }
-
     const handleMessage = (event: MessageEvent) => {
       const data = event.data
+
+      if (data?.type === 'employee-tabulator:hello') {
+        if (event.source && event.origin !== 'null') {
+          console.log('Replying ready to hello sender', event.origin)
+          ;(event.source as Window).postMessage(
+            { type: 'employee-tabulator:ready' },
+            event.origin,
+          )
+        }
+        return
+      }
+
       if (
         data &&
         typeof data === 'object' &&
@@ -118,9 +118,7 @@ function App() {
         __lfLocked: true,
       })) as EmployeeRow[]
 
-      initialized = true
       targetOrigin.current = event.origin === 'null' ? '*' : event.origin
-      if (readyTimer !== undefined) window.clearInterval(readyTimer)
       addedRows.current.clear()
       updatedRows.current.clear()
       deletedRows.current.clear()
@@ -133,16 +131,7 @@ function App() {
     }
 
     window.addEventListener('message', handleMessage)
-    announceReady()
-    if (window.parent !== window) {
-      readyTimer = window.setInterval(() => {
-        if (!initialized) announceReady()
-      }, 1000)
-    }
-    return () => {
-      window.removeEventListener('message', handleMessage)
-      if (readyTimer !== undefined) window.clearInterval(readyTimer)
-    }
+    return () => window.removeEventListener('message', handleMessage)
   }, [])
 
   useEffect(() => {

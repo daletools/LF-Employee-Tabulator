@@ -432,6 +432,7 @@ function toTabulatorData(input) {
 
 const TABULATOR_ORIGIN = "https://daletools.github.io";
 let tabulatorWindow = null;
+let helloTimer = null;
 
 function sendTableToTabulator() {
   const table = LFForm.getFieldValues({ fieldId: 44 });
@@ -465,8 +466,28 @@ window.addEventListener("message", (event) => {
   }
 
   tabulatorWindow = event.source;
+  if (helloTimer !== null) {
+    clearInterval(helloTimer);
+    helloTimer = null;
+  }
   sendTableToTabulator();
 });
+
+function sendHelloToTabulatorFrames() {
+  for (let index = 0; index < window.parent.frames.length; index++) {
+    try {
+      window.parent.frames[index].postMessage(
+        { type: "employee-tabulator:hello" },
+        TABULATOR_ORIGIN,
+      );
+    } catch (error) {
+      console.debug("Could not send tabulator hello to frame", index, error);
+    }
+  }
+}
+
+sendHelloToTabulatorFrames();
+helloTimer = setInterval(sendHelloToTabulatorFrames, 250);
 
 window.addEventListener("message", (event) => {
   console.log("message diagnostic", {
