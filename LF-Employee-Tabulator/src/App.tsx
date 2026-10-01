@@ -11,43 +11,128 @@ type EmployeeRow = Record<string, unknown> & {
 
 type ChangeSet = {
   type: 'employee-tabulator:save'
-  added: Record<string, unknown>[]
-  updated: Record<string, unknown>[]
-  deleted: Record<string, unknown>[]
+  flights: Record<string, unknown>[]
 }
 
-const INTERNAL_PREFIX = '__lf'
+const GRID_COLUMNS: ColumnDefinition[] = [
+  { title: 'Employee number', field: 'Employee_Number', width: 145, editable: false },
+  { title: 'Full name', field: 'FullName', width: 190, editable: false },
+  { title: 'Status', field: 'Status', width: 125, editable: false },
+  { title: 'Flight number', field: 'Flight_Number', width: 155 },
+  { title: 'Carrier', field: 'Flight_Carrier', width: 145 },
+  { title: 'Origin', field: 'Flight_Origin', width: 130 },
+  { title: 'Destination', field: 'Flight_Destination', width: 145 },
+  { title: 'Flight date', field: 'Flight_Date', width: 150, editor: 'date' },
+  {
+    title: 'Flight type',
+    field: 'Flight_Type',
+    width: 135,
+    editor: 'list',
+    editorParams: { values: ['Arrival', 'Departure'] },
+  },
+]
 
-function normalizeColumns(columns: unknown[]): ColumnDefinition[] {
-  return columns.flatMap((column) => {
-    if (typeof column === 'string') {
-      return [{ title: column, field: column }]
-    }
+function columnsForFlights(flights: Record<string, unknown>[]): ColumnDefinition[] {
+  const flightOptions: Record<string, string> = { '': '(Clear flight assignment)' }
+  for (const flight of flights) {
+    const flightNumber = String(flight.Flight_Number ?? '')
+    if (flightNumber) flightOptions[flightNumber] = flightNumber
+  }
 
-    if (column && typeof column === 'object' && 'field' in column) {
-      return [column as ColumnDefinition]
-    }
-
-    return []
-  })
+  return GRID_COLUMNS.map((column) =>
+    column.field === 'Flight_Number'
+      ? {
+          ...column,
+          editor: 'list',
+          editorParams: {
+            values: flightOptions,
+            autocomplete: true,
+            listOnEmpty: true,
+            allowEmpty: true,
+            emptyValue: '',
+            clearable: true,
+            freetext: false,
+          },
+        }
+      : column,
+  )
 }
 
-function toPublicRow(row: EmployeeRow): Record<string, unknown> {
+function dateForGrid(value: unknown): string {
+  if (value && typeof value === 'object' && 'dateStr' in value) {
+    return String(value.dateStr ?? '')
+  }
+  return typeof value === 'string' ? value.slice(0, 10) : ''
+}
+
+function buildGridRows(employees: Record<string, unknown>[], flights: Record<string, unknown>[]): EmployeeRow[] {
+  const flightsByEmployee = new Map<string, Record<string, unknown>[]>()
+  for (const flight of flights) {
+    const employeeNumber = String(flight.Employee_Number ?? '')
+    if (!employeeNumber) continue
+    const matches = flightsByEmployee.get(employeeNumber) ?? []
+    matches.push(flight)
+    flightsByEmployee.set(employeeNumber, matches)
+  }
+
+  const rows: EmployeeRow[] = []
+  for (const employee of employees) {
+    const employeeNumber = String(
+      employee.Employee_Number ?? employee.EmployeeNumber ?? employee.employeeNumber ?? '',
+    )
+    const employeeFlights = flightsByEmployee.get(employeeNumber) ?? [{}]
+    for (const flight of employeeFlights) {
+      const flightDate = flight.Flight_Date
+      const dateTime = flightDate && typeof flightDate === 'object'
+        ? flightDate as { dateStr?: string; timeStr?: string }
+        : undefined
+      rows.push({
+        Employee_Number: employeeNumber,
+        FullName: employee.FullName ?? employee.fullName ?? '',
+        Status: employee.Status ?? employee.status ?? '',
+        Flight_Number: flight.Flight_Number ?? '',
+        Flight_Carrier: flight.Flight_Carrier ?? '',
+        Flight_Origin: flight.Flight_Origin ?? '',
+        Flight_Destination: flight.Flight_Destination ?? '',
+        Flight_Date: dateForGrid(flightDate),
+        Flight_Type: flight.Flight_Type ?? '',
+        __lfFlightTime: dateTime?.timeStr ?? '',
+        __lfRowId: `flight-${rows.length}`,
+        __lfLocked: true,
+        __lfNew: false,
+      })
+    }
+  }
+  return rows
+}
+
+function toFlightPayload(row: EmployeeRow): Record<string, unknown> {
+  const dateStr = String(row.Flight_Date ?? '')
+  const flightDate = dateStr
+    ? {
+        dateStr,
+        ...(row.__lfFlightTime ? { timeStr: row.__lfFlightTime } : {}),
+      }
+    : ''
+
   return {
-    ...Object.fromEntries(
-    Object.entries(row).filter(([key]) => !key.startsWith(INTERNAL_PREFIX)),
-    ),
-    locked: row.__lfLocked,
+    Employee_Number: row.Employee_Number,
+    Flight_Number: row.Flight_Number,
+    Flight_Carrier: row.Flight_Carrier,
+    Flight_Origin: row.Flight_Origin,
+    Flight_Destination: row.Flight_Destination,
+    Flight_Date: flightDate,
+    Flight_Type: row.Flight_Type,
   }
 }
 
 function App() {
   const tableElement = useRef<HTMLDivElement>(null)
   const table = useRef<Tabulator | null>(null)
+  const formWindow = useRef<Window | null>(null)
   const targetOrigin = useRef('*')
-  const addedRows = useRef(new Map<string, EmployeeRow>())
+  const flightDefinitions = useRef(new Map<string, Record<string, unknown>>())
   const updatedRows = useRef(new Map<string, EmployeeRow>())
-  const deletedRows = useRef(new Map<string, Record<string, unknown>>())
   const [columns, setColumns] = useState<ColumnDefinition[]>([])
   const [rows, setRows] = useState<EmployeeRow[]>([])
   const [ready, setReady] = useState(false)
@@ -55,22 +140,33 @@ function App() {
   const [changeCount, setChangeCount] = useState(0)
   const [rowCount, setRowCount] = useState(0)
   const [saving, setSaving] = useState(false)
+  const [saveNotice, setSaveNotice] = useState('')
 
   function trackUpdate(row: EmployeeRow) {
-    if (addedRows.current.has(row.__lfRowId)) {
-      addedRows.current.set(row.__lfRowId, row)
-    } else {
-      updatedRows.current.set(row.__lfRowId, row)
-    }
-    setChangeCount(addedRows.current.size + updatedRows.current.size + deletedRows.current.size)
+    updatedRows.current.set(row.__lfRowId, row)
+    setSaveNotice('')
+    setChangeCount(updatedRows.current.size)
   }
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data
 
+      if (data?.type === 'employee-tabulator:saved') {
+        setSaving(false)
+        setSaveNotice(`${Number(data.rowsSaved) || 0} flight row(s) added to the form.`)
+        return
+      }
+
+      if (data?.type === 'employee-tabulator:save-error') {
+        setSaving(false)
+        setSaveNotice(`The form could not save flight rows: ${String(data.message ?? 'Unknown error')}`)
+        return
+      }
+
       if (data?.type === 'employee-tabulator:hello') {
         if (event.source && event.origin !== 'null') {
+          formWindow.current = event.source as Window
           console.log('Replying ready to hello sender', event.origin)
           ;(event.source as Window).postMessage(
             { type: 'employee-tabulator:ready' },
@@ -89,41 +185,27 @@ function App() {
         return
       }
 
-      let incomingColumns: unknown[] | undefined
-      let incomingRows: unknown[] | undefined
-
-      if (Array.isArray(data) && data.length === 2) {
-        ;[incomingColumns, incomingRows] = data
-      } else if (data && typeof data === 'object') {
-        const payload = data as { columns?: unknown; rows?: unknown; data?: unknown }
-        incomingColumns = Array.isArray(payload.columns) ? payload.columns : undefined
-        incomingRows = Array.isArray(payload.rows)
-          ? payload.rows
-          : Array.isArray(payload.data)
-            ? payload.data
-            : undefined
+      const payload = data as {
+        data?: { employees?: unknown; flights?: unknown }
       }
+      const employeeRows = payload.data?.employees
+      const flightRows = payload.data?.flights
+      if (!Array.isArray(employeeRows) || !Array.isArray(flightRows)) return
 
-      if (!incomingColumns || !incomingRows) return
-
-      const normalizedColumns = normalizeColumns(incomingColumns)
-      if (!normalizedColumns.length) {
-        setMessage('The supplied column definition is empty or invalid')
-        return
+      const normalizedRows = buildGridRows(employeeRows, flightRows)
+      const definitions = new Map<string, Record<string, unknown>>()
+      for (const flight of flightRows) {
+        const flightNumber = String(flight.Flight_Number ?? '')
+        if (flightNumber && !definitions.has(flightNumber)) {
+          definitions.set(flightNumber, flight)
+        }
       }
-
-      const normalizedRows = incomingRows.map((row, index) => ({
-        ...(row && typeof row === 'object' ? row : {}),
-        __lfRowId: `initial-${index}`,
-        __lfLocked: true,
-      })) as EmployeeRow[]
+      flightDefinitions.current = definitions
 
       targetOrigin.current = event.origin === 'null' ? '*' : event.origin
-      addedRows.current.clear()
-      updatedRows.current.clear()
-      deletedRows.current.clear()
+      if (event.source) formWindow.current = event.source as Window
       setChangeCount(0)
-      setColumns(normalizedColumns)
+      setColumns(columnsForFlights(flightRows))
       setRows(normalizedRows)
       setRowCount(normalizedRows.length)
       setReady(true)
@@ -164,7 +246,6 @@ function App() {
           cellClick: (_event, cell) => {
             const row = cell.getRow()
             row.update({ __lfLocked: !row.getData().__lfLocked })
-            trackUpdate(row.getData() as EmployeeRow)
           },
         },
       ],
@@ -173,14 +254,40 @@ function App() {
       placeholder: 'No employee records',
       movableColumns: true,
       resizableColumnFit: true,
-      selectableRows: 1,
       reactiveData: false,
       columnDefaults: { vertAlign: 'middle', tooltip: true },
     })
 
-    grid.on('cellEdited', (cell: CellComponent) =>
-      trackUpdate(cell.getRow().getData() as EmployeeRow),
-    )
+    grid.on('cellEdited', (cell: CellComponent) => {
+      const row = cell.getRow()
+      if (cell.getField() === 'Flight_Number') {
+        const flightNumber = String(cell.getValue() ?? '')
+        const definition = flightDefinitions.current.get(flightNumber)
+        if (!flightNumber) {
+          row.update({
+            Flight_Carrier: '',
+            Flight_Origin: '',
+            Flight_Destination: '',
+            Flight_Date: '',
+            Flight_Type: '',
+            __lfFlightTime: '',
+          })
+        } else if (definition) {
+          const dateTime = definition.Flight_Date && typeof definition.Flight_Date === 'object'
+            ? definition.Flight_Date as { dateStr?: string; timeStr?: string }
+            : undefined
+          row.update({
+            Flight_Carrier: definition.Flight_Carrier ?? '',
+            Flight_Origin: definition.Flight_Origin ?? '',
+            Flight_Destination: definition.Flight_Destination ?? '',
+            Flight_Date: dateForGrid(definition.Flight_Date),
+            Flight_Type: definition.Flight_Type ?? '',
+            __lfFlightTime: dateTime?.timeStr ?? '',
+          })
+        }
+      }
+      trackUpdate(row.getData() as EmployeeRow)
+    })
     grid.on('rowAdded', () => setRowCount(grid.getDataCount()))
     grid.on('rowDeleted', () => setRowCount(grid.getDataCount()))
     table.current = grid
@@ -190,69 +297,57 @@ function App() {
     }
   }, [columns, ready, rows])
 
-  function addRow() {
-    const row: EmployeeRow = {
-      ...Object.fromEntries(columns.map((column) => [column.field, ''])),
-      __lfRowId: `added-${crypto.randomUUID()}`,
-      __lfLocked: false,
-    }
-    addedRows.current.set(row.__lfRowId, row)
-    table.current?.addRow(row, true)
-    setChangeCount(addedRows.current.size + updatedRows.current.size + deletedRows.current.size)
-  }
-
-  function deleteSelectedRow() {
-    const selected = table.current?.getSelectedRows()[0]
-    if (!selected) return
-    const row = selected.getData() as EmployeeRow
-    if (addedRows.current.has(row.__lfRowId)) {
-      addedRows.current.delete(row.__lfRowId)
-    } else {
-      deletedRows.current.set(row.__lfRowId, toPublicRow(row))
-      updatedRows.current.delete(row.__lfRowId)
-    }
-    selected.delete()
-    setChangeCount(addedRows.current.size + updatedRows.current.size + deletedRows.current.size)
-  }
-
   function saveChanges() {
+    const changedRows = [...updatedRows.current.values()]
+    const invalidRows = changedRows.filter((row) => {
+      const deletionMarker = [
+        row.Flight_Number,
+        row.Flight_Carrier,
+        row.Flight_Origin,
+        row.Flight_Destination,
+        row.Flight_Date,
+        row.Flight_Type,
+      ].every((value) => value == null || value === '')
+      return !row.Employee_Number ||
+        (!deletionMarker && !['Arrival', 'Departure'].includes(String(row.Flight_Type)))
+    })
+    if (invalidRows.length) {
+      setSaveNotice('Choose an existing flight number or clear the flight assignment on every changed row.')
+      return
+    }
+
     const payload: ChangeSet = {
       type: 'employee-tabulator:save',
-      added: [...addedRows.current.values()].map(toPublicRow),
-      updated: [...updatedRows.current.values()].map(toPublicRow),
-      deleted: [...deletedRows.current.values()],
+      flights: changedRows.map(toFlightPayload),
     }
-    window.parent.postMessage(payload, targetOrigin.current)
-    addedRows.current.clear()
+    ;(formWindow.current ?? window.parent).postMessage(payload, targetOrigin.current)
     updatedRows.current.clear()
-    deletedRows.current.clear()
     setChangeCount(0)
+    setSaveNotice('Flight rows sent to the form.')
     setSaving(true)
     window.setTimeout(() => setSaving(false), 1200)
   }
 
   function loadSample() {
-    const sampleColumns = [
-      { title: 'Employee ID', field: 'employeeId', width: 140 },
-      { title: 'First name', field: 'firstName' },
-      { title: 'Last name', field: 'lastName' },
-      { title: 'Department', field: 'department' },
-      { title: 'Work email', field: 'email' },
-    ]
-    const sampleRows = Array.from({ length: 3000 }, (_, index) => ({
-      employeeId: `LF-${String(index + 1).padStart(4, '0')}`,
-      firstName: ['Morgan', 'Avery', 'Jordan', 'Riley'][index % 4],
-      lastName: ['Chen', 'Patel', 'Rivera', 'Wilson'][index % 4],
-      department: ['People', 'Finance', 'Operations', 'Research'][index % 4],
-      email: `employee${index + 1}@example.org`,
+    const employees = Array.from({ length: 3000 }, (_, index) => ({
+      Employee_Number: `LF-${String(index + 1).padStart(4, '0')}`,
+      FullName: ['Morgan Chen', 'Avery Patel', 'Jordan Rivera', 'Riley Wilson'][index % 4],
+      Status: ['Active', 'Leave', 'Active', 'Terminated'][index % 4],
     }))
-    setColumns(normalizeColumns(sampleColumns))
+    const flights = employees.slice(0, 4).map((employee, index) => ({
+      Employee_Number: employee.Employee_Number,
+      Flight_Number: `LF${420 + index}`,
+      Flight_Carrier: 'Northstar Air',
+      Flight_Origin: 'YVR',
+      Flight_Destination: 'YYZ',
+      Flight_Date: { dateStr: '2026-10-01', timeStr: '08:30:00 AM' },
+      Flight_Type: index % 2 === 0 ? 'Departure' : 'Arrival',
+    }))
+    flightDefinitions.current = new Map(flights.map((flight) => [String(flight.Flight_Number), flight]))
+    setColumns(columnsForFlights(flights))
     targetOrigin.current = window.location.origin
-    setRows(sampleRows.map((row, index) => ({
-      ...row,
-      __lfRowId: `sample-${index}`,
-      __lfLocked: true,
-    })))
+    const sampleRows = buildGridRows(employees, flights)
+    setRows(sampleRows)
     setRowCount(sampleRows.length)
     setReady(true)
     setMessage('')
@@ -278,10 +373,6 @@ function App() {
       <section className="table-section" aria-label="Employee records">
         <div className="table-toolbar">
           <div className="table-title"><span className="section-index">01</span><h2>All employees</h2><span className="count-chip">{rowCount.toLocaleString()}</span></div>
-          <div className="table-actions">
-            <button className="button button-quiet" type="button" onClick={deleteSelectedRow} disabled={!ready}>Remove selected</button>
-            <button className="button button-outline" type="button" onClick={addRow} disabled={!ready}><span aria-hidden="true">+</span> Add employee</button>
-          </div>
         </div>
         {!ready ? (
           <div className="empty-state">
@@ -300,7 +391,7 @@ function App() {
       </section>
 
       <div className="save-bar">
-        <span>{changeCount ? `${changeCount} change${changeCount === 1 ? '' : 's'} ready to send` : 'No changes to send yet'}</span>
+        <span>{saveNotice || (changeCount ? `${changeCount} change${changeCount === 1 ? '' : 's'} ready to send` : 'No changes to send yet')}</span>
         <button className="button button-save" type="button" onClick={saveChanges} disabled={!ready || !changeCount || saving}>
           {saving ? 'Changes sent' : 'Save changes'} <span aria-hidden="true">↗</span>
         </button>

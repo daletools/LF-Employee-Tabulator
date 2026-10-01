@@ -433,27 +433,154 @@ function toTabulatorData(input) {
 const TABULATOR_ORIGIN = "https://daletools.github.io";
 let tabulatorWindow = null;
 let helloTimer = null;
+let employeeTableReady = false;
+let flightLookupReady = false;
+let initialDataSent = false;
+
+function readTableColumn(fieldId) {
+  const value = LFForm.getFieldValues({ fieldId });
+  if (Array.isArray(value)) return value;
+  return value == null ? [] : [value];
+}
+
+function readFlightRows() {
+  const fields = {
+    Employee_Number: readTableColumn(51),
+    Flight_Number: readTableColumn(52),
+    Flight_Carrier: readTableColumn(53),
+    Flight_Origin: readTableColumn(54),
+    Flight_Destination: readTableColumn(55),
+    Flight_Date: readTableColumn(56),
+    Flight_Type: readTableColumn(57),
+  };
+  const rowCount = Math.max(
+    0,
+    ...Object.values(fields).map((values) => values.length),
+  );
+
+  return Array.from({ length: rowCount }, (_, index) =>
+    Object.fromEntries(
+      Object.entries(fields).map(([field, values]) => [
+        field,
+        values[index] ?? "",
+      ]),
+    ),
+  );
+}
+
+function buildTabulatorPayload() {
+  const employeeTable = LFForm.getFieldValues({ fieldId: 44 });
+  const employeeRows = toTabulatorData(employeeTable).rows.map((row) => ({
+    Employee_Number: row.Employee_Number ?? row.EmployeeNumber ?? "",
+    FullName: row.FullName ?? "",
+    Status: row.Status ?? "",
+  }));
+
+  return {
+    type: "employee-tabulator:init",
+    data: {
+      employees: employeeRows,
+      flights: readFlightRows(),
+    },
+  };
+}
 
 function sendTableToTabulator() {
-  const table = LFForm.getFieldValues({ fieldId: 44 });
-  if (!table || !tabulatorWindow) {
-    console.log(`no table or tabulator window`);
-    console.log(tabulatorWindow);
+  if (
+    !tabulatorWindow ||
+    !employeeTableReady ||
+    !flightLookupReady ||
+    initialDataSent
+  ) {
+    console.log("tabulator init deferred", {
+      hasWindow: Boolean(tabulatorWindow),
+      employeeTableReady,
+      flightLookupReady,
+      initialDataSent,
+    });
     return;
   }
 
-  const { columns, rows } = toTabulatorData(table);
+  const payload = buildTabulatorPayload();
+  tabulatorWindow.postMessage(payload, TABULATOR_ORIGIN);
+  initialDataSent = true;
+  console.log("sent employee and flight data to tabulator", {
+    employees: payload.data.employees.length,
+    flights: payload.data.flights.length,
+  });
+}
 
-  console.log(`posting message`);
+async function appendFlightsToOutputTable(flights) {
+  const validFlights = flights.filter((flight) => {
+    const rawDate = flight.Flight_Date;
+    const dateIsBlank =
+      !rawDate ||
+      (typeof rawDate === "object" && !rawDate.dateStr && !rawDate.timeStr);
+    const deletionMarker =
+      [
+        flight.Flight_Number,
+        flight.Flight_Carrier,
+        flight.Flight_Origin,
+        flight.Flight_Destination,
+        flight.Flight_Type,
+      ].every((value) => value == null || value === "") && dateIsBlank;
 
-  tabulatorWindow.postMessage(
-    {
-      type: "employee-tabulator:init",
-      columns,
-      rows,
-    },
-    TABULATOR_ORIGIN,
-  );
+    return (
+      flight.Employee_Number &&
+      (deletionMarker || ["Arrival", "Departure"].includes(flight.Flight_Type))
+    );
+  });
+  if (validFlights.length === 0) return 0;
+
+  const existingEmployeeNumbers = LFForm.getFieldValues({ fieldId: 60 });
+  const firstIndex = Array.isArray(existingEmployeeNumbers)
+    ? existingEmployeeNumbers.length
+    : existingEmployeeNumbers == null || existingEmployeeNumbers === ""
+      ? 0
+      : 1;
+
+  await LFForm.addRow({ fieldId: 59 }, validFlights.length);
+
+  for (let offset = 0; offset < validFlights.length; offset++) {
+    const flight = validFlights[offset];
+    const index = firstIndex + offset;
+    const rawDate = flight.Flight_Date;
+    const dateValue =
+      rawDate && typeof rawDate === "object"
+        ? {
+            dateStr: rawDate.dateStr ?? "",
+            ...(rawDate.timeStr ? { timeStr: rawDate.timeStr } : {}),
+          }
+        : { dateStr: String(rawDate ?? "") };
+
+    await LFForm.setFieldValues(
+      { fieldId: 60, index },
+      String(flight.Employee_Number),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 61, index },
+      String(flight.Flight_Number ?? ""),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 62, index },
+      String(flight.Flight_Carrier ?? ""),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 63, index },
+      String(flight.Flight_Origin ?? ""),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 64, index },
+      String(flight.Flight_Destination ?? ""),
+    );
+    await LFForm.setFieldValues({ fieldId: 65, index }, dateValue);
+    await LFForm.setFieldValues(
+      { fieldId: 66, index },
+      String(flight.Flight_Type),
+    );
+  }
+
+  return validFlights.length;
 }
 
 window.addEventListener("message", (event) => {
@@ -473,6 +600,34 @@ window.addEventListener("message", (event) => {
   sendTableToTabulator();
 });
 
+window.addEventListener("message", async (event) => {
+  if (
+    event.origin !== TABULATOR_ORIGIN ||
+    event.source !== tabulatorWindow ||
+    event.data?.type !== "employee-tabulator:save" ||
+    !Array.isArray(event.data.flights)
+  ) {
+    return;
+  }
+
+  try {
+    const rowsSaved = await appendFlightsToOutputTable(event.data.flights);
+    event.source.postMessage(
+      { type: "employee-tabulator:saved", rowsSaved },
+      TABULATOR_ORIGIN,
+    );
+  } catch (error) {
+    console.error("Could not append flights to output table", error);
+    event.source.postMessage(
+      {
+        type: "employee-tabulator:save-error",
+        message: error instanceof Error ? error.message : String(error),
+      },
+      TABULATOR_ORIGIN,
+    );
+  }
+});
+
 function sendHelloToTabulatorFrames() {
   for (let index = 0; index < window.parent.frames.length; index++) {
     try {
@@ -488,6 +643,22 @@ function sendHelloToTabulatorFrames() {
 
 sendHelloToTabulatorFrames();
 helloTimer = setInterval(sendHelloToTabulatorFrames, 250);
+
+LFForm.onFieldChange(
+  () => {
+    employeeTableReady = true;
+    sendTableToTabulator();
+  },
+  { fieldId: 47 },
+);
+
+LFForm.onFieldChange(
+  () => {
+    flightLookupReady = true;
+    sendTableToTabulator();
+  },
+  { fieldId: 57 },
+);
 
 window.addEventListener("message", (event) => {
   console.log("message diagnostic", {
@@ -505,11 +676,3 @@ window.addEventListener("message", (event) => {
     data: event.data,
   });
 });
-
-LFForm.onFieldChange(
-  () => {
-    console.log(`posting message`);
-    sendTableToTabulator();
-  },
-  { fieldId: 47 },
-);

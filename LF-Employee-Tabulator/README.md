@@ -17,40 +17,34 @@ The repository includes a GitHub Actions deployment workflow. In GitHub, open **
 
 The live site URL is <https://daletools.github.io/LF-Employee-Tabulator/>. The workflow installs from this app's lockfile, builds the Vite site with the `/LF-Employee-Tabulator/` base path, and deploys the build artifact. Local development continues to use `/`.
 
-## Iframe message contract
+## Iframe data contract
 
-Send the initial data from the parent frame after the iframe has loaded. The page accepts this object shape, `{ columns, rows }`, or the aliases `{ columns, data }` and `[columns, rows]`:
-
-```js
-employeeFrame.contentWindow.postMessage(
-  {
-    type: "employee-tabulator:init",
-    columns: [
-      { title: "Employee ID", field: "employeeId" },
-      { title: "First name", field: "firstName" },
-      { title: "Department", field: "department" },
-    ],
-    rows: [
-      { employeeId: "LF-0001", firstName: "Morgan", department: "People" },
-    ],
-  },
-  "https://your-hosted-tabulator.example",
-);
-```
-
-Columns may also be an array of field-name strings. Column objects use Tabulator's column definition format. Data rows are objects keyed by each column's `field`. Initial records are locked; use the final **Row access** column to unlock a row before editing it. The **Add employee** action creates an unlocked record. Select a row before choosing **Remove selected**.
-
-On **Save changes**, the iframe posts this payload to its parent:
+The form script sends one object after the employee table is populated and the lookup triggered by `Flight_Type` completes:
 
 ```js
 {
-  type: 'employee-tabulator:save',
-  added: [{ employeeId: '', firstName: '', department: '', locked: false }],
-  updated: [{ employeeId: 'LF-0001', firstName: 'Morgan', department: 'People', locked: false }],
-  deleted: [{ employeeId: 'LF-0002', firstName: 'Avery', department: 'Finance', locked: true }],
+  type: "employee-tabulator:init",
+  data: {
+    employees: [
+      { Employee_Number: "4790", FullName: "Diaz Rodriguez, Camila", Status: "Active" },
+    ],
+    flights: [
+      {
+        Employee_Number: "4790",
+        Flight_Number: "AC123",
+        Flight_Carrier: "Air Canada",
+        Flight_Origin: "YVR",
+        Flight_Destination: "YYZ",
+        Flight_Date: { dateStr: "2026-10-01", timeStr: "08:30:00 AM" },
+        Flight_Type: "Departure",
+      },
+    ],
+  },
 }
 ```
 
-Each list contains only records changed in that category. Row-lock state is returned as `locked`. Internal table identifiers are omitted.
+The grid joins each flight to its employee by `Employee_Number`; employees with no flight get a blank flight row. Employee number, full name, and status are read-only. Unlocking a row enables only flight fields. Flight Number is an autocomplete list based on existing flight data; selecting one fills carrier, origin, destination, date, and type from that flight definition. Selecting the blank option clears those fields and marks the employee row for deletion. Flight type is restricted to `Arrival` or `Departure` for assigned flights. Dates are displayed as `YYYY-MM-DD` and sent back as the LFForm DateTime value object `{ dateStr, timeStr? }`.
 
-**Temporary proof-of-concept messaging:** the form script probes its parent window's child frames with `employee-tabulator:hello` every 250 ms. The hosted page replies with `employee-tabulator:ready` directly to the hello sender, and the form then sends init data directly to that frame. The hosted page currently accepts supported init-shaped messages from any sender, and replies to changes using the init sender's origin (or `*` for an opaque origin). This permissive mode is only for initial connectivity testing; restore strict origin and source validation before production use.
+On **Save changes**, the page sends `{ type: "employee-tabulator:save", flights: [...] }` directly to the form sandbox. Assigned flights and deletion markers (employee number plus blank flight fields) are appended as new rows in table field `59`, setting fields `60` through `66` in order: employee number, flight number, carrier, origin, destination, DateTime, and flight type. A later process can interpret blank flight fields as a deletion request. The source employee and flight tables are fields `44` and `50`; flight columns are fields `51` through `57`. The form waits for changes to fields `47` and `57` before sending the initial snapshot.
+
+**Temporary proof-of-concept messaging:** the form script probes child frames of its parent with `employee-tabulator:hello` every 250 ms. The hosted page replies with `employee-tabulator:ready` directly to the hello sender, and the form sends the init object directly to that frame. This test mode accepts init messages from any sender; restore strict origin and source validation before production use.
