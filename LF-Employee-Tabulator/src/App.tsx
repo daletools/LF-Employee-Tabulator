@@ -79,6 +79,58 @@ function dateTimeForLaser(date: unknown, time: unknown): Record<string, string> 
   }
 }
 
+function flightNumberEditor(
+  cell: CellComponent,
+  onRendered: (callback: () => void) => void,
+  success: (value: unknown) => boolean,
+  cancel: (value: unknown) => void,
+  options: Record<string, string>,
+): HTMLInputElement {
+  const input = document.createElement('input')
+  const datalist = document.createElement('datalist')
+  const listId = `flight-options-${crypto.randomUUID()}`
+  let completed = false
+
+  datalist.id = listId
+  for (const [value, label] of Object.entries(options)) {
+    const option = document.createElement('option')
+    option.value = value
+    option.label = label
+    datalist.append(option)
+  }
+  document.body.append(datalist)
+
+  input.type = 'text'
+  input.value = String(cell.getValue() ?? '')
+  input.setAttribute('list', listId)
+  input.style.width = '100%'
+  input.style.height = '100%'
+  input.style.boxSizing = 'border-box'
+
+  const cleanup = () => datalist.remove()
+  const commit = () => {
+    if (completed) return
+    success(input.value)
+    completed = true
+    cleanup()
+  }
+  const cancelEdit = () => {
+    if (completed) return
+    completed = true
+    cleanup()
+    cancel(undefined)
+  }
+
+  input.addEventListener('change', commit)
+  input.addEventListener('blur', commit)
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') commit()
+    if (event.key === 'Escape') cancelEdit()
+  })
+  onRendered(() => input.focus())
+  return input
+}
+
 const GRID_COLUMNS: ColumnDefinition[] = [
   { title: 'Employee number', field: 'Employee_Number', width: 145, editable: false },
   { title: 'Full name', field: 'FullName', width: 190, editable: false },
@@ -98,8 +150,11 @@ const GRID_COLUMNS: ColumnDefinition[] = [
   },
 ]
 
-function columnsForFlights(flights: Record<string, unknown>[]): ColumnDefinition[] {
-  const flightOptions: Record<string, string> = { '': '(Clear flight assignment)' }
+function columnsForFlights(
+  flights: Record<string, unknown>[],
+  flightOptions: Record<string, string>,
+): ColumnDefinition[] {
+  for (const key of Object.keys(flightOptions)) delete flightOptions[key]
   for (const flight of flights) {
     const flightNumber = String(flight.Flight_Number ?? '')
     if (flightNumber) flightOptions[flightNumber] = flightNumber
@@ -109,16 +164,8 @@ function columnsForFlights(flights: Record<string, unknown>[]): ColumnDefinition
     column.field === 'Flight_Number'
       ? {
           ...column,
-          editor: 'list',
-          editorParams: {
-            values: flightOptions,
-            autocomplete: true,
-            listOnEmpty: true,
-            allowEmpty: true,
-            emptyValue: '',
-            clearable: true,
-            freetext: true,
-          },
+          editor: (cell, onRendered, success, cancel) =>
+            flightNumberEditor(cell, onRendered, success, cancel, flightOptions),
         }
       : column,
   )
@@ -180,6 +227,7 @@ function App() {
   const formWindow = useRef<Window | null>(null)
   const targetOrigin = useRef('*')
   const flightDefinitions = useRef(new Map<string, Record<string, unknown>>())
+  const flightOptions = useRef<Record<string, string>>({})
   const originalRows = useRef(new Map<string, string>())
   const updatedRows = useRef(new Map<string, EmployeeRow>())
   const [columns, setColumns] = useState<ColumnDefinition[]>([])
@@ -306,7 +354,7 @@ function App() {
       )
       updatedRows.current.clear()
       setChangeCount(0)
-      setColumns(columnsForFlights(flightRows))
+      setColumns(columnsForFlights(flightRows, flightOptions.current))
       setRows(normalizedRows)
       setRowCount(normalizedRows.length)
       setReady(true)
@@ -380,6 +428,7 @@ function App() {
           for (const target of affectedRows) clearFlightDefinition(target)
           updateFlightDefinition(flightNumber, row.getData() as EmployeeRow)
         }
+        if (flightNumber) flightOptions.current[flightNumber] = flightNumber
         for (const target of affectedRows) trackUpdate(target.getData() as EmployeeRow)
         return
       }
@@ -462,7 +511,7 @@ function App() {
       Flight_Type: index % 2 === 0 ? 'Departure' : 'Arrival',
     }))
     flightDefinitions.current = new Map(flights.map((flight) => [String(flight.Flight_Number), flight]))
-    setColumns(columnsForFlights(flights))
+    setColumns(columnsForFlights(flights, flightOptions.current))
     targetOrigin.current = window.location.origin
     const sampleRows = buildGridRows(employees, flights)
     originalRows.current = new Map(
