@@ -1,8 +1,8 @@
 .workspace {
-  width: min(100%, 1480px);
+  width: min(100%, 1800px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 0 clamp(18px, 4vw, 64px) 20px;
+  padding: 0 clamp(18px, 2vw, 36px) 20px;
   box-sizing: border-box;
   color: var(--ink);
 }
@@ -384,7 +384,7 @@
 }
 
 .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
-  padding: 8px 10px;
+  padding: 7px 6px;
 }
 
 .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input {
@@ -414,8 +414,11 @@
 }
 
 .tabulator .tabulator-cell {
-  padding: 9px 10px;
+  padding: 8px 7px;
   border-right: 1px solid #f0f2f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabulator .tabulator-cell.tabulator-editing {

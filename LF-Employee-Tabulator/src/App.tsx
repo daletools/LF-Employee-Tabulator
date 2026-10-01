@@ -132,19 +132,20 @@ function flightNumberEditor(
 }
 
 const GRID_COLUMNS: ColumnDefinition[] = [
-  { title: 'Employee number', field: 'Employee_Number', width: 145, editable: false },
-  { title: 'Full name', field: 'FullName', width: 190, editable: false },
-  { title: 'Status', field: 'Status', width: 125, editable: false },
-  { title: 'Flight number', field: 'Flight_Number', width: 155 },
-  { title: 'Carrier', field: 'Flight_Carrier', width: 145 },
-  { title: 'Origin', field: 'Flight_Origin', width: 130 },
-  { title: 'Destination', field: 'Flight_Destination', width: 145 },
-  { title: 'Flight date', field: 'Flight_Date', width: 145, editor: 'date' },
-  { title: 'Flight time', field: 'Flight_Time', width: 125, editor: 'time' },
+  { title: 'Employee number', field: 'Employee_Number', minWidth: 112, widthGrow: 1.1, editable: false },
+  { title: 'Full name', field: 'FullName', minWidth: 150, widthGrow: 1.6, editable: false },
+  { title: 'Status', field: 'Status', minWidth: 90, widthGrow: 0.8, editable: false },
+  { title: 'Flight number', field: 'Flight_Number', minWidth: 120, widthGrow: 1.1 },
+  { title: 'Carrier', field: 'Flight_Carrier', minWidth: 120, widthGrow: 1.3 },
+  { title: 'Origin', field: 'Flight_Origin', minWidth: 90, widthGrow: 0.8 },
+  { title: 'Destination', field: 'Flight_Destination', minWidth: 110, widthGrow: 1.0 },
+  { title: 'Flight date', field: 'Flight_Date', minWidth: 120, widthGrow: 1.0, editor: 'date' },
+  { title: 'Flight time', field: 'Flight_Time', minWidth: 82, widthGrow: 0.8, editor: 'time' },
   {
     title: 'Flight type',
     field: 'Flight_Type',
-    width: 135,
+    minWidth: 100,
+    widthGrow: 0.9,
     editor: 'list',
     editorParams: { values: ['Arrival', 'Departure'] },
   },
@@ -384,8 +385,8 @@ function App() {
         {
           title: 'Row access',
           field: '__lfLocked',
-          width: 132,
-          minWidth: 132,
+          minWidth: 104,
+          widthGrow: 0.7,
           hozAlign: 'center',
           headerSort: false,
           formatter: (cell) => {
