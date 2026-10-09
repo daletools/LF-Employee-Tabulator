@@ -26,6 +26,7 @@ type RequestRow = EmployeeRow & {
   Preferred_Arrival_By: string
   Flight_Number: string
   Flight_Arrival: string
+  Arrival_Airport: string
 }
 
 const FLIGHT_FIELDS = [
@@ -52,6 +53,7 @@ const REQUEST_FIELDS = [
   'Preferred_Arrival_By',
   'Flight_Number',
   'Flight_Arrival',
+  'Arrival_Airport',
 ] as const
 
 function requestSnapshot(row: EmployeeRow): string {
@@ -80,6 +82,7 @@ function buildRequestRows(
       Preferred_Arrival_By: dateForGrid(request.Preferred_Arrival_By),
       Flight_Number: String(request.Flight_Number ?? ''),
       Flight_Arrival: dateForGrid(request.Flight_Arrival),
+      Arrival_Airport: String(request.Arrival_Airport ?? ''),
       __lfRowId: `request-${index}`,
       __lfLocked: true,
     }
@@ -238,15 +241,6 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       field: 'Request_Status',
       minWidth: 135,
       widthGrow: 1.1,
-      editor: 'list',
-      editorParams: {
-        values: {
-          '': 'Blank',
-          Requested: 'Requested',
-          'Flight Booked': 'Flight Booked',
-          Arrived: 'Arrived',
-        },
-      },
     },
     {
       title: 'Farm',
@@ -265,7 +259,8 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       editorParams: { min: minDate },
     },
     { title: 'Flight number', field: 'Flight_Number', minWidth: 120, widthGrow: 1.1 },
-    { title: 'Flight arrival', field: 'Flight_Arrival', minWidth: 135, widthGrow: 1.1, editor: 'date' },
+    { title: 'Flight arrival', field: 'Flight_Arrival', minWidth: 135, widthGrow: 1.1 },
+    { title: 'Arrival airport', field: 'Arrival_Airport', minWidth: 130, widthGrow: 1.0 },
   ]
 }
 
@@ -554,8 +549,7 @@ function App() {
       editable: (cell: { getRow: () => RowComponent; getField: () => string }) => {
         const rowData = cell.getRow().getData()
         if (viewMode.current === 'employee-request') {
-          if (cell.getField() === 'Request_Status') return true
-          return Boolean(rowData.Request_Status) && column.editable !== false
+          return ['Farm', 'Preferred_Arrival_By'].includes(cell.getField())
         }
         return column.editable !== false && !rowData.__lfLocked
       },
@@ -743,7 +737,7 @@ function App() {
         <div>
           <p className="eyebrow">DIRECTORY <span>/</span> {viewMode.current === 'employee-request' ? 'REQUESTS' : 'RECORDS'}</p>
           <h1>{viewMode.current === 'employee-request' ? 'Employee requests' : 'Employee records'}</h1>
-          <p className="subheading">{viewMode.current === 'employee-request' ? 'Manage employee flight requests.' : 'Review, update, and return changes to your form.'}</p>
+          <p className="subheading">{viewMode.current === 'employee-request' ? 'Manage employee hiring requests.' : 'Review, update, and return changes to your form.'}</p>
         </div>
         <div className="record-total"><strong>{rowCount.toLocaleString()}</strong><span>records</span></div>
       </section>

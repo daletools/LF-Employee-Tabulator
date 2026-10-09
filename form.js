@@ -87,6 +87,9 @@ function readFlightRows() {
     Flight_Destination: readTableColumn(55),
     Flight_Date: readTableColumn(56),
     Flight_Type: readTableColumn(57),
+    Request_Status: readTableColumn(80),
+    Farm: readTableColumn(82),
+    Requested_Arrival: readTableColumn(83),
   };
   const rowCount = Math.max(
     0,
@@ -165,13 +168,53 @@ function buildEmployeeRequestPayload() {
     ),
   ];
 
+  const employees = readEmployeeRows();
+  const requestByEmployee = new Map();
+  const arrivalFound = new Set();
+
+  for (const flight of readFlightRows()) {
+    const employeeNumber = String(flight.Employee_Number ?? "");
+    if (!employeeNumber) continue;
+
+    const request = requestByEmployee.get(employeeNumber) ?? {
+      Employee_Number: employeeNumber,
+      Request_Status: "",
+      Farm: "",
+      Preferred_Arrival_By: "",
+      Flight_Number: "",
+      Flight_Arrival: "",
+      Arrival_Airport: "",
+    };
+
+    request.Request_Status ||= flight.Request_Status ?? "";
+    request.Farm ||= flight.Farm ?? "";
+    request.Preferred_Arrival_By ||= flight.Requested_Arrival ?? "";
+
+    if (
+      !arrivalFound.has(employeeNumber) &&
+      String(flight.Flight_Type ?? "").toLowerCase() === "arrival"
+    ) {
+      request.Flight_Number = flight.Flight_Number ?? "";
+      request.Flight_Arrival = flight.Flight_Date ?? "";
+      request.Arrival_Airport = flight.Flight_Destination ?? "";
+      arrivalFound.add(employeeNumber);
+    }
+
+    requestByEmployee.set(employeeNumber, request);
+  }
+
   return {
     type: "employee-tabulator:init",
     view: "employee-request",
     data: {
-      employees: readEmployeeRows(),
+      employees,
       farms,
-      requests: [],
+      requests: employees.map(
+        (employee) =>
+          requestByEmployee.get(String(employee.Employee_Number ?? "")) ?? {
+            Employee_Number: String(employee.Employee_Number ?? ""),
+          },
+      ),
     },
   };
 }
@@ -180,6 +223,7 @@ function sendEmployeeRequestsToTabulator() {
   if (
     !requestTabulatorWindow ||
     !employeeTableReady ||
+    !flightLookupReady ||
     !farmTableReady ||
     requestDataSent
   ) {
@@ -475,6 +519,7 @@ LFForm.onFieldChange(
     }
     flightLookupReady = true;
     sendTableToTabulator();
+    sendEmployeeRequestsToTabulator();
   },
   { fieldId: 57 },
 );
