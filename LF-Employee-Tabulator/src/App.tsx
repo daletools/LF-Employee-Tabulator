@@ -14,6 +14,20 @@ type ChangeSet = {
   flights: Record<string, unknown>[]
 }
 
+type RequestChangeSet = {
+  type: 'employee-request:save'
+  requests: Record<string, unknown>[]
+}
+
+type ViewMode = 'flights' | 'employee-request'
+type RequestRow = EmployeeRow & {
+  Request_Status: string
+  Farm: string
+  Preferred_Arrival_By: string
+  Flight_Number: string
+  Flight_Arrival: string
+}
+
 const FLIGHT_FIELDS = [
   'Flight_Number',
   'Flight_Carrier',
@@ -27,6 +41,60 @@ const FLIGHT_DEFINITION_FIELDS = FLIGHT_FIELDS.filter((field) => field !== 'Flig
 
 function flightSnapshot(row: EmployeeRow): string {
   return JSON.stringify(FLIGHT_FIELDS.map((field) => row[field] ?? ''))
+}
+
+const REQUEST_FIELDS = [
+  'Employee_Number',
+  'FullName',
+  'Status',
+  'Request_Status',
+  'Farm',
+  'Preferred_Arrival_By',
+  'Flight_Number',
+  'Flight_Arrival',
+] as const
+
+function requestSnapshot(row: EmployeeRow): string {
+  return JSON.stringify(REQUEST_FIELDS.map((field) => row[field] ?? ''))
+}
+
+function buildRequestRows(
+  employees: Record<string, unknown>[],
+  requests: Record<string, unknown>[] = [],
+): RequestRow[] {
+  const requestByEmployee = new Map(
+    requests.map((request) => [String(request.Employee_Number ?? ''), request]),
+  )
+
+  return employees.map((employee, index) => {
+    const employeeNumber = String(
+      employee.Employee_Number ?? employee.EmployeeNumber ?? employee.employeeNumber ?? '',
+    )
+    const request = requestByEmployee.get(employeeNumber) ?? {}
+    return {
+      Employee_Number: employeeNumber,
+      FullName: String(employee.FullName ?? employee.fullName ?? ''),
+      Status: String(employee.Status ?? employee.status ?? ''),
+      Request_Status: String(request.Request_Status ?? ''),
+      Farm: String(request.Farm ?? ''),
+      Preferred_Arrival_By: dateForGrid(request.Preferred_Arrival_By),
+      Flight_Number: String(request.Flight_Number ?? ''),
+      Flight_Arrival: dateForGrid(request.Flight_Arrival),
+      __lfRowId: `request-${index}`,
+      __lfLocked: true,
+    }
+  })
+}
+
+function toRequestPayload(row: RequestRow): Record<string, unknown> {
+  return {
+    Employee_Number: row.Employee_Number,
+    Request_Status: row.Request_Status,
+    Farm: row.Farm,
+    Preferred_Arrival_By: dateTimeForLaser(row.Preferred_Arrival_By, ''),
+    Flight_Number: row.Flight_Number,
+    Flight_Arrival: dateTimeForLaser(row.Flight_Arrival, ''),
+  }
 }
 
 function flightDefinition(row: EmployeeRow): Record<string, unknown> {
@@ -151,6 +219,55 @@ const GRID_COLUMNS: ColumnDefinition[] = [
   },
 ]
 
+function requestColumns(farms: string[]): ColumnDefinition[] {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const minDate = [
+    tomorrow.getFullYear(),
+    String(tomorrow.getMonth() + 1).padStart(2, '0'),
+    String(tomorrow.getDate()).padStart(2, '0'),
+  ].join('-')
+
+  return [
+    { title: 'Employee number', field: 'Employee_Number', minWidth: 112, widthGrow: 1.1, editable: false },
+    { title: 'Full name', field: 'FullName', minWidth: 150, widthGrow: 1.5, editable: false },
+    { title: 'Current status', field: 'Status', minWidth: 100, widthGrow: 0.9, editable: false },
+    {
+      title: 'Request status',
+      field: 'Request_Status',
+      minWidth: 135,
+      widthGrow: 1.1,
+      editor: 'list',
+      editorParams: {
+        values: {
+          '': 'Blank',
+          Requested: 'Requested',
+          'Flight Booked': 'Flight Booked',
+          Arrived: 'Arrived',
+        },
+      },
+    },
+    {
+      title: 'Farm',
+      field: 'Farm',
+      minWidth: 130,
+      widthGrow: 1.1,
+      editor: 'list',
+      editorParams: { values: ['', ...farms] },
+    },
+    {
+      title: 'Preferred arrival by',
+      field: 'Preferred_Arrival_By',
+      minWidth: 155,
+      widthGrow: 1.2,
+      editor: 'date',
+      editorParams: { min: minDate },
+    },
+    { title: 'Flight number', field: 'Flight_Number', minWidth: 120, widthGrow: 1.1 },
+    { title: 'Flight arrival', field: 'Flight_Arrival', minWidth: 135, widthGrow: 1.1, editor: 'date' },
+  ]
+}
+
 function columnsForFlights(
   flights: Record<string, unknown>[],
   flightOptions: Record<string, string>,
@@ -223,6 +340,11 @@ function toFlightPayload(row: EmployeeRow): Record<string, unknown> {
 }
 
 function App() {
+  const viewMode = useRef<ViewMode>(
+    new URLSearchParams(window.location.search).get('view') === 'employee-request'
+      ? 'employee-request'
+      : 'flights',
+  )
   const tableElement = useRef<HTMLDivElement>(null)
   const table = useRef<Tabulator | null>(null)
   const formWindow = useRef<Window | null>(null)
@@ -234,7 +356,11 @@ function App() {
   const [columns, setColumns] = useState<ColumnDefinition[]>([])
   const [rows, setRows] = useState<EmployeeRow[]>([])
   const [ready, setReady] = useState(false)
-  const [message, setMessage] = useState('Waiting for employee data from Laserfiche')
+  const [message, setMessage] = useState(
+    viewMode.current === 'employee-request'
+      ? 'Waiting for employee request data from Laserfiche'
+      : 'Waiting for employee data from Laserfiche',
+  )
   const [changeCount, setChangeCount] = useState(0)
   const [rowCount, setRowCount] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -242,7 +368,10 @@ function App() {
 
   function trackUpdate(row: EmployeeRow) {
     const original = originalRows.current.get(row.__lfRowId)
-    if (original !== undefined && original === flightSnapshot(row)) {
+    const snapshot = viewMode.current === 'employee-request'
+      ? requestSnapshot(row)
+      : flightSnapshot(row)
+    if (original !== undefined && original === snapshot) {
       updatedRows.current.delete(row.__lfRowId)
     } else {
       updatedRows.current.set(row.__lfRowId, row)
@@ -304,9 +433,21 @@ function App() {
         return
       }
 
+      if (data?.type === 'employee-request:saved') {
+        setSaving(false)
+        setSaveNotice(`${Number(data.rowsSaved) || 0} employee request(s) received by the form.`)
+        return
+      }
+
       if (data?.type === 'employee-tabulator:save-error') {
         setSaving(false)
         setSaveNotice(`The form could not save flight rows: ${String(data.message ?? 'Unknown error')}`)
+        return
+      }
+
+      if (data?.type === 'employee-request:save-error') {
+        setSaving(false)
+        setSaveNotice(`The form could not receive employee requests: ${String(data.message ?? 'Unknown error')}`)
         return
       }
 
@@ -315,7 +456,7 @@ function App() {
           formWindow.current = event.source as Window
           console.log('Replying ready to hello sender', event.origin)
           ;(event.source as Window).postMessage(
-            { type: 'employee-tabulator:ready' },
+            { type: 'employee-tabulator:ready', view: viewMode.current },
             event.origin,
           )
         }
@@ -332,11 +473,48 @@ function App() {
       }
 
       const payload = data as {
-        data?: { employees?: unknown; flights?: unknown }
+        view?: ViewMode
+        data?: {
+          employees?: unknown
+          flights?: unknown
+          farms?: unknown
+          requests?: unknown
+        }
       }
+      if (payload.view && payload.view !== viewMode.current) return
       const employeeRows = payload.data?.employees
+      if (!Array.isArray(employeeRows)) return
+
+      if (viewMode.current === 'employee-request') {
+        const farmValues = payload.data?.farms
+        const requestValues = payload.data?.requests
+        if (!Array.isArray(farmValues)) return
+        const farms = [...new Set(farmValues.map((farm) => {
+          if (typeof farm === 'string') return farm
+          if (!farm || typeof farm !== 'object') return ''
+          const entry = farm as Record<string, unknown>
+          return String(entry.Farm ?? entry.Farm_Name ?? entry.Name ?? entry.data ?? '')
+        }).filter(Boolean))]
+        const requestRows = Array.isArray(requestValues) ? requestValues : []
+        const normalizedRows = buildRequestRows(employeeRows, requestRows)
+
+        targetOrigin.current = event.origin === 'null' ? '*' : event.origin
+        if (event.source) formWindow.current = event.source as Window
+        originalRows.current = new Map(
+          normalizedRows.map((row) => [row.__lfRowId, requestSnapshot(row)]),
+        )
+        updatedRows.current.clear()
+        setChangeCount(0)
+        setColumns(requestColumns(farms))
+        setRows(normalizedRows)
+        setRowCount(normalizedRows.length)
+        setReady(true)
+        setMessage('')
+        return
+      }
+
       const flightRows = payload.data?.flights
-      if (!Array.isArray(employeeRows) || !Array.isArray(flightRows)) return
+      if (!Array.isArray(flightRows)) return
 
       const normalizedRows = buildGridRows(employeeRows, flightRows)
       const definitions = new Map<string, Record<string, unknown>>()
@@ -372,33 +550,43 @@ function App() {
     const editableColumns = columns.map((column) => ({
       ...column,
       editor: column.editor ?? 'input',
-      editable: (cell: { getRow: () => RowComponent }) =>
-        column.editable !== false && !cell.getRow().getData().__lfLocked,
+      editable: (cell: { getRow: () => RowComponent; getField: () => string }) => {
+        const rowData = cell.getRow().getData()
+        if (viewMode.current === 'employee-request') {
+          if (cell.getField() === 'Request_Status') return true
+          return Boolean(rowData.Request_Status) && column.editable !== false
+        }
+        return column.editable !== false && !rowData.__lfLocked
+      },
       headerFilter: column.headerFilter ?? 'input',
     }))
+
+    const tableColumns = viewMode.current === 'employee-request'
+      ? editableColumns
+      : [
+          ...editableColumns,
+          {
+            title: 'Row access',
+            field: '__lfLocked',
+            minWidth: 104,
+            widthGrow: 0.7,
+            hozAlign: 'center' as const,
+            headerSort: false,
+            formatter: (cell: { getValue: () => unknown }) => {
+              const locked = Boolean(cell.getValue())
+              return `<span class="lock-state ${locked ? 'is-locked' : 'is-open'}"><span class="lock-dot"></span>${locked ? 'Locked' : 'Editable'}</span>`
+            },
+            cellClick: (_event: UIEvent, cell: CellComponent) => {
+              const row = cell.getRow()
+              row.update({ __lfLocked: !row.getData().__lfLocked })
+            },
+          },
+        ]
 
     const grid = new Tabulator(tableElement.current, {
       data: rows,
       index: '__lfRowId',
-      columns: [
-        ...editableColumns,
-        {
-          title: 'Row access',
-          field: '__lfLocked',
-          minWidth: 104,
-          widthGrow: 0.7,
-          hozAlign: 'center',
-          headerSort: false,
-          formatter: (cell) => {
-            const locked = Boolean(cell.getValue())
-            return `<span class="lock-state ${locked ? 'is-locked' : 'is-open'}"><span class="lock-dot"></span>${locked ? 'Locked' : 'Editable'}</span>`
-          },
-          cellClick: (_event, cell) => {
-            const row = cell.getRow()
-            row.update({ __lfLocked: !row.getData().__lfLocked })
-          },
-        },
-      ],
+      columns: tableColumns,
       layout: 'fitColumns',
       height: '100%',
       placeholder: 'No employee records',
@@ -458,7 +646,10 @@ function App() {
   function saveChanges() {
     const changedRows = [...updatedRows.current.values()].filter((row) => {
       const original = originalRows.current.get(row.__lfRowId)
-      return original === undefined || original !== flightSnapshot(row)
+      const current = viewMode.current === 'employee-request'
+        ? requestSnapshot(row)
+        : flightSnapshot(row)
+      return original === undefined || original !== current
     })
     for (const rowId of updatedRows.current.keys()) {
       if (!changedRows.some((row) => row.__lfRowId === rowId)) {
@@ -466,6 +657,21 @@ function App() {
       }
     }
     setChangeCount(changedRows.length)
+
+    if (viewMode.current === 'employee-request') {
+      const payload: RequestChangeSet = {
+        type: 'employee-request:save',
+        requests: (changedRows as RequestRow[]).map(toRequestPayload),
+      }
+      ;(formWindow.current ?? window.parent).postMessage(payload, targetOrigin.current)
+      updatedRows.current.clear()
+      setChangeCount(0)
+      setSaveNotice('Employee request updates sent to the form.')
+      setSaving(true)
+      window.setTimeout(() => setSaving(false), 1200)
+      return
+    }
+
     const invalidRows = changedRows.filter((row) => {
       const deletionMarker = [
         row.Flight_Number,
@@ -529,29 +735,29 @@ function App() {
     <main className="workspace">
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">LF</div>
-        <div className="brand-copy"><span>PEOPLE OPERATIONS</span><strong>Employee register</strong></div>
+        <div className="brand-copy"><span>PEOPLE OPERATIONS</span><strong>{viewMode.current === 'employee-request' ? 'Employee requests' : 'Employee register'}</strong></div>
         <div className="connection"><span className={ready ? 'connection-dot is-live' : 'connection-dot'} />{ready ? 'Form connected' : 'Awaiting form data'}</div>
       </header>
 
       <section className="page-heading">
         <div>
-          <p className="eyebrow">DIRECTORY <span>/</span> RECORDS</p>
-          <h1>Employee records</h1>
-          <p className="subheading">Review, update, and return changes to your form.</p>
+          <p className="eyebrow">DIRECTORY <span>/</span> {viewMode.current === 'employee-request' ? 'REQUESTS' : 'RECORDS'}</p>
+          <h1>{viewMode.current === 'employee-request' ? 'Employee requests' : 'Employee records'}</h1>
+          <p className="subheading">{viewMode.current === 'employee-request' ? 'Manage employee flight requests.' : 'Review, update, and return changes to your form.'}</p>
         </div>
         <div className="record-total"><strong>{rowCount.toLocaleString()}</strong><span>records</span></div>
       </section>
 
       <section className="table-section" aria-label="Employee records">
         <div className="table-toolbar">
-          <div className="table-title"><span className="section-index">01</span><h2>All employees</h2><span className="count-chip">{rowCount.toLocaleString()}</span></div>
+          <div className="table-title"><span className="section-index">01</span><h2>{viewMode.current === 'employee-request' ? 'Employee requests' : 'All employees'}</h2><span className="count-chip">{rowCount.toLocaleString()}</span></div>
         </div>
         {!ready ? (
           <div className="empty-state">
             <div className="empty-mark" aria-hidden="true">↘</div>
             <strong>{message}</strong>
             <span>Waiting for columns and employee rows.</span>
-            <button className="sample-link" type="button" onClick={loadSample}>Preview with 3,000 sample records</button>
+            {viewMode.current === 'flights' && <button className="sample-link" type="button" onClick={loadSample}>Preview with 3,000 sample records</button>}
           </div>
         ) : (
           <div className="table-host"><div ref={tableElement} /></div>
@@ -565,7 +771,7 @@ function App() {
       <div className="save-bar">
         <span>{saveNotice || (changeCount ? `${changeCount} change${changeCount === 1 ? '' : 's'} ready to send` : 'No changes to send yet')}</span>
         <button className="button button-save" type="button" onClick={saveChanges} disabled={!ready || !changeCount || saving}>
-          {saving ? 'Changes sent' : 'Save changes'} <span aria-hidden="true">↗</span>
+          {saving ? 'Changes sent' : viewMode.current === 'employee-request' ? 'Save requests' : 'Save changes'} <span aria-hidden="true">↗</span>
         </button>
       </div>
       <div className="page-foot"><span>LASERFICHE CLOUD FORM INTEGRATION</span><span>EMPLOYEE DATA</span></div>

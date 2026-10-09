@@ -17,7 +17,34 @@ The repository includes a GitHub Actions deployment workflow. In GitHub, open **
 
 The live site URL is <https://daletools.github.io/LF-Employee-Tabulator/>. The workflow installs from this app's lockfile, builds the Vite site with the `/LF-Employee-Tabulator/` base path, and deploys the build artifact. Local development continues to use `/`.
 
-## Iframe data contract
+## Laserfiche iframe setup
+
+Embed the hosted page in two separate iframe fields:
+
+- Flight management: `https://daletools.github.io/LF-Employee-Tabulator/`
+- Employee requests (field 68): `https://daletools.github.io/LF-Employee-Tabulator/?view=employee-request`
+
+The form script reads employees from table field `44` and farm choices from field `70`. It sends request data after the employee table (field `47`) and farm table (field `70`) report changes. The request page shows employee number, full name, current status, request status, farm, preferred arrival date, flight number, and flight arrival date. Request status options are blank, Requested, Flight Booked, and Arrived. The request status is always editable; the remaining request fields become editable when it is nonblank. Preferred arrival dates are constrained to tomorrow or later.
+
+The form script probes child frames with `employee-tabulator:hello`; each hosted page replies with `employee-tabulator:ready` and its view. The script keeps the flight and request frames separate and sends each its matching `employee-tabulator:init` payload. The flight page uses the contract below. The request page receives:
+
+```js
+{
+  type: "employee-tabulator:init",
+  view: "employee-request",
+  data: {
+    employees: [
+      { Employee_Number: "4790", FullName: "Diaz Rodriguez, Camila", Status: "Active" },
+    ],
+    farms: ["North Farm", "South Farm"],
+    requests: [],
+  },
+}
+```
+
+Saving request edits sends `{ type: "employee-request:save", requests: [...] }` to the form script. Each request contains `Employee_Number`, `Request_Status`, `Farm`, `Preferred_Arrival_By`, `Flight_Number`, and `Flight_Arrival`; date values use the LFForm DateTime shape `{ dateStr, timeStr? }`. At present the form script exposes received rows as `window.employeeRequestChanges` and acknowledges receipt, but does not persist them to LFForm. Configure a destination table/fields before treating request saves as durable.
+
+## Flight iframe data contract
 
 The form script sends one object after the employee table is populated and the lookup triggered by `Flight_Type` completes:
 
@@ -46,5 +73,3 @@ The form script sends one object after the employee table is populated and the l
 The grid joins each flight to its employee by `Employee_Number`; employees with no flight get a blank flight row. Employee number, full name, and status are read-only. Unlocking a row enables only flight fields. Flight Number suggestions come from existing flight data, but free-text values are allowed for defining new flights. Selecting a known number fills its carrier, route, date/time, and type. Editing a nonblank flight's definition updates every row sharing that flight number. Selecting the blank option clears those fields and marks each affected employee row for deletion. Flight type is restricted to `Arrival` or `Departure` for assigned flights. Dates and times are sent back as the LFForm DateTime object `{ dateStr, timeStr? }`.
 
 On **Save changes**, the page first drops any touched row that matches its original flight data, then sends `{ type: "employee-tabulator:save", flights: [...] }` directly to the form sandbox. Assigned flights and deletion markers (employee number plus blank flight fields) are appended as new rows in table field `59`, setting fields `60` through `66` in order: employee number, flight number, carrier, origin, destination, DateTime, and flight type. A later process can interpret blank flight fields as a deletion request. The source employee and flight tables are fields `44` and `50`; flight columns are fields `51` through `57`. The form waits for changes to fields `47` and `57` before sending the initial snapshot.
-
-**Temporary proof-of-concept messaging:** the form script probes child frames of its parent with `employee-tabulator:hello` every 250 ms. The hosted page replies with `employee-tabulator:ready` directly to the hello sender, and the form sends the init object directly to that frame. This test mode accepts init messages from any sender; restore strict origin and source validation before production use.
