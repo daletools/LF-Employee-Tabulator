@@ -20,12 +20,14 @@ type RequestChangeSet = {
 }
 
 type ViewMode = 'flights' | 'employee-request'
+type GridDateTime = { dateStr: string; timeStr?: string }
 type RequestRow = EmployeeRow & {
   Request_Status: string
   Farm: string
   Preferred_Arrival_By: string
   Flight_Number: string
-  Flight_Arrival: string
+  Flight_Arrival: GridDateTime | ''
+  Departure_Airport: string
   Arrival_Airport: string
 }
 
@@ -53,11 +55,28 @@ const REQUEST_FIELDS = [
   'Preferred_Arrival_By',
   'Flight_Number',
   'Flight_Arrival',
+  'Departure_Airport',
   'Arrival_Airport',
 ] as const
 
 function requestSnapshot(row: EmployeeRow): string {
   return JSON.stringify(REQUEST_FIELDS.map((field) => row[field] ?? ''))
+}
+
+function dateTimeForGrid(value: unknown): GridDateTime | '' {
+  const dateStr = dateForGrid(value)
+  if (!dateStr) return ''
+  const timeStr = timeForGrid(value)
+  return { dateStr, ...(timeStr ? { timeStr } : {}) }
+}
+
+function dateTimeForDisplay(value: unknown): string {
+  if (!value || typeof value !== 'object' || !('dateStr' in value)) {
+    return dateForGrid(value)
+  }
+  const dateStr = String(value.dateStr ?? '')
+  const timeStr = String('timeStr' in value ? value.timeStr ?? '' : '')
+  return [dateStr, timeStr].filter(Boolean).join(' ')
 }
 
 function buildRequestRows(
@@ -81,7 +100,8 @@ function buildRequestRows(
       Farm: String(request.Farm ?? ''),
       Preferred_Arrival_By: dateForGrid(request.Preferred_Arrival_By),
       Flight_Number: String(request.Flight_Number ?? ''),
-      Flight_Arrival: dateForGrid(request.Flight_Arrival),
+      Flight_Arrival: dateTimeForGrid(request.Flight_Arrival),
+      Departure_Airport: String(request.Departure_Airport ?? ''),
       Arrival_Airport: String(request.Arrival_Airport ?? ''),
       __lfRowId: `request-${index}`,
       __lfLocked: true,
@@ -142,8 +162,15 @@ function timeForGrid(value: unknown): string {
 }
 
 function dateTimeForLaser(date: unknown, time: unknown): Record<string, string> | '' {
-  const dateStr = String(date ?? '')
-  const timeValue = String(time ?? '')
+  const dateValue = date && typeof date === 'object' && 'dateStr' in date
+    ? date.dateStr
+    : date
+  const timeValue = String(
+    date && typeof date === 'object' && 'timeStr' in date
+      ? date.timeStr ?? time ?? ''
+      : time ?? '',
+  )
+  const dateStr = String(dateValue ?? '')
   if (!dateStr) return ''
   return {
     dateStr,
@@ -312,7 +339,14 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       editorParams: { min: minDate },
     },
     { title: 'Flight number', field: 'Flight_Number', minWidth: 120, widthGrow: 1.1 },
-    { title: 'Flight arrival', field: 'Flight_Arrival', minWidth: 135, widthGrow: 1.1 },
+    {
+      title: 'Flight Arrival/Departure',
+      field: 'Flight_Arrival',
+      minWidth: 175,
+      widthGrow: 1.2,
+      formatter: (cell: CellComponent) => dateTimeForDisplay(cell.getValue()),
+    },
+    { title: 'Departure airport', field: 'Departure_Airport', minWidth: 130, widthGrow: 1.0 },
     { title: 'Arrival airport', field: 'Arrival_Airport', minWidth: 130, widthGrow: 1.0 },
   ]
 }
@@ -608,6 +642,7 @@ function App() {
           if (field === 'Request_Status') {
             return !isBooked && Object.hasOwn(REQUEST_STATUS_TRANSITIONS, requestStatus)
           }
+          if (requestStatus === 'Arrived') return false
           if (field === 'Farm') return Boolean(requestStatus)
           if (field === 'Preferred_Arrival_By') {
             return Boolean(requestStatus) && !isBooked

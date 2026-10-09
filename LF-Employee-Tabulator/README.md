@@ -24,7 +24,7 @@ Embed the hosted page in two separate iframe fields:
 - Flight management: `https://daletools.github.io/LF-Employee-Tabulator/`
 - Employee requests (field 68): `https://daletools.github.io/LF-Employee-Tabulator/?view=employee-request`
 
-The form script reads employees from table field `44` and farm choices from field `70`. It sends request data after the employee table (field `47`), Employee Flights lookup (field `57`), and farm table (field `70`) report changes. Employee Flights fields `80`, `82`, and `83` supply request status, farm, and requested arrival date. Flight rows are matched by employee number; the Arrival row supplies flight number, flight arrival date, and arrival airport (the flight destination). The request page shows employee number, full name, current status, request status, farm, requested arrival, flight number, flight arrival date, and arrival airport. Request Status transitions are Blank ↔ Requested, Arrived ↔ Request Return; `Flight Booked` and `Return Flight Booked` lock the entire row. Farm and requested arrival are editable for nonblank, unlocked statuses. Preferred arrival dates are constrained to tomorrow or later.
+The form script reads employees from table field `44` and farm choices from field `70`. It sends request data after the employee table (field `47`), Employee Flights lookup (field `57`), and farm table (field `70`) report changes. Employee Flights fields `80`, `82`, and `83` supply request status, farm, and requested arrival date. Flight rows are matched by employee number; the Arrival row supplies flight number and date/time, with its origin and destination shown as departure and arrival airports. The request page shows employee number, full name, current status, request status, farm, requested arrival, flight number, flight arrival/departure date and time, departure airport, and arrival airport. Request Status transitions are Blank ↔ Requested, Arrived ↔ Request Return; `Flight Booked` and `Return Flight Booked` lock the entire row. For `Arrived`, only Request Status remains editable until another status is selected. Farm is editable for every nonblank status, and requested arrival is editable for nonblank statuses other than the booked statuses and `Arrived`. Preferred arrival dates are constrained to tomorrow or later.
 
 The form script probes child frames with `employee-tabulator:hello`; each hosted page replies with `employee-tabulator:ready` and its view. The script keeps the flight and request frames separate and sends each its matching `employee-tabulator:init` payload. The flight page uses the contract below. The request page receives:
 
@@ -45,6 +45,7 @@ The form script probes child frames with `employee-tabulator:hello`; each hosted
         Preferred_Arrival_By: { dateStr: "2026-10-20" },
         Flight_Number: "AC123",
         Flight_Arrival: { dateStr: "2026-10-18", timeStr: "08:30:00 AM" },
+        Departure_Airport: "YVR",
         Arrival_Airport: "YYZ",
       },
     ],
@@ -52,7 +53,7 @@ The form script probes child frames with `employee-tabulator:hello`; each hosted
 }
 ```
 
-Saving request edits sends `{ type: "employee-request:save", requests: [...] }` to the form script. Each request contains `Employee_Number`, `FullName`, `Request_Status`, `Farm`, `Preferred_Arrival_By`, `Flight_Number`, and `Flight_Arrival`; date values use the LFForm DateTime shape `{ dateStr, timeStr? }`. The form appends saved requests to table field `71`, mapping employee number, full name, request status, farm, preferred arrival, flight number, and flight arrival to fields `72` through `78`. Blank request status, farm, or flight number values are stored as `Cancel`, `TBD`, and `TBD`; blank dates are stored as `{ dateStr: "1900-01-01" }`. Arrival Airport is currently display-only because no output field ID has been provided for it.
+Saving request edits sends `{ type: "employee-request:save", requests: [...] }` to the form script. Each request contains `Employee_Number`, `FullName`, `Request_Status`, `Farm`, `Preferred_Arrival_By`, `Flight_Number`, and `Flight_Arrival`; date values use the LFForm DateTime shape `{ dateStr, timeStr? }`. The form appends saved requests to table field `71`, mapping employee number, full name, request status, farm, preferred arrival, flight number, and flight arrival to fields `72` through `78`. Blank request status, farm, or flight number values are stored as `Cancel`, `TBD`, and `TBD`; blank dates are stored as `{ dateStr: "1900-01-01" }`. Departure and arrival airports are display-only because no output field IDs have been provided for them.
 
 ## Flight iframe data contract
 

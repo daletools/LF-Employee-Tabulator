@@ -183,6 +183,7 @@ function buildEmployeeRequestPayload() {
       Preferred_Arrival_By: "",
       Flight_Number: "",
       Flight_Arrival: "",
+      Departure_Airport: "",
       Arrival_Airport: "",
     };
 
@@ -196,6 +197,7 @@ function buildEmployeeRequestPayload() {
     ) {
       request.Flight_Number = flight.Flight_Number ?? "";
       request.Flight_Arrival = flight.Flight_Date ?? "";
+      request.Departure_Airport = flight.Flight_Origin ?? "";
       request.Arrival_Airport = flight.Flight_Destination ?? "";
       arrivalFound.add(employeeNumber);
     }
