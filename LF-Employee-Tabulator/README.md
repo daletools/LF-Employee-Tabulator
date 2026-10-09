@@ -42,7 +42,7 @@ The form script probes child frames with `employee-tabulator:hello`; each hosted
 }
 ```
 
-Saving request edits sends `{ type: "employee-request:save", requests: [...] }` to the form script. Each request contains `Employee_Number`, `Request_Status`, `Farm`, `Preferred_Arrival_By`, `Flight_Number`, and `Flight_Arrival`; date values use the LFForm DateTime shape `{ dateStr, timeStr? }`. At present the form script exposes received rows as `window.employeeRequestChanges` and acknowledges receipt, but does not persist them to LFForm. Configure a destination table/fields before treating request saves as durable.
+Saving request edits sends `{ type: "employee-request:save", requests: [...] }` to the form script. Each request contains `Employee_Number`, `FullName`, `Request_Status`, `Farm`, `Preferred_Arrival_By`, `Flight_Number`, and `Flight_Arrival`; date values use the LFForm DateTime shape `{ dateStr, timeStr? }`. The form appends saved requests to table field `71`, mapping employee number, full name, request status, farm, preferred arrival, flight number, and flight arrival to fields `72` through `78`. Blank request status, farm, or flight number values are stored as `Cancel`, `TBD`, and `TBD`; blank dates are stored as `{ dateStr: "1900-01-01" }`.
 
 ## Flight iframe data contract
 

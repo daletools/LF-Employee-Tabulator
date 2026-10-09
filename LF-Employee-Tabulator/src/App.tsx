@@ -89,6 +89,7 @@ function buildRequestRows(
 function toRequestPayload(row: RequestRow): Record<string, unknown> {
   return {
     Employee_Number: row.Employee_Number,
+    FullName: row.FullName,
     Request_Status: row.Request_Status,
     Farm: row.Farm,
     Preferred_Arrival_By: dateTimeForLaser(row.Preferred_Arrival_By, ''),
@@ -435,7 +436,7 @@ function App() {
 
       if (data?.type === 'employee-request:saved') {
         setSaving(false)
-        setSaveNotice(`${Number(data.rowsSaved) || 0} employee request(s) received by the form.`)
+        setSaveNotice(`${Number(data.rowsSaved) || 0} employee request(s) saved to the form.`)
         return
       }
 
@@ -447,7 +448,7 @@ function App() {
 
       if (data?.type === 'employee-request:save-error') {
         setSaving(false)
-        setSaveNotice(`The form could not receive employee requests: ${String(data.message ?? 'Unknown error')}`)
+        setSaveNotice(`The form could not save employee requests: ${String(data.message ?? 'Unknown error')}`)
         return
       }
 
@@ -668,7 +669,6 @@ function App() {
       setChangeCount(0)
       setSaveNotice('Employee request updates sent to the form.')
       setSaving(true)
-      window.setTimeout(() => setSaving(false), 1200)
       return
     }
 

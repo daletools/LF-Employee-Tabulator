@@ -63,6 +63,14 @@ let flightLookupReady = false;
 let farmTableReady = false;
 let initialDataSent = false;
 let requestDataSent = false;
+let helloScanLogged = false;
+const connectedViews = new Set();
+let allConnectionsLogged = false;
+
+console.info("[LF bridge] script started", {
+  origin: window.location.origin,
+  parentFrameCount: window.parent.frames.length,
+});
 
 function readTableColumn(fieldId) {
   const value = LFForm.getFieldValues({ fieldId });
@@ -124,19 +132,13 @@ function sendTableToTabulator() {
     !flightLookupReady ||
     initialDataSent
   ) {
-    console.log("tabulator init deferred", {
-      hasWindow: Boolean(tabulatorWindow),
-      employeeTableReady,
-      flightLookupReady,
-      initialDataSent,
-    });
     return;
   }
 
   const payload = buildTabulatorPayload();
   tabulatorWindow.postMessage(payload, TABULATOR_ORIGIN);
   initialDataSent = true;
-  console.log("sent employee and flight data to tabulator", {
+  console.info("[LF bridge] flight init sent", {
     employees: payload.data.employees.length,
     flights: payload.data.flights.length,
   });
@@ -180,13 +182,14 @@ function sendEmployeeRequestsToTabulator() {
     !employeeTableReady ||
     !farmTableReady ||
     requestDataSent
-  )
+  ) {
     return;
+  }
 
   const payload = buildEmployeeRequestPayload();
   requestTabulatorWindow.postMessage(payload, TABULATOR_ORIGIN);
   requestDataSent = true;
-  console.log("sent employee request data to tabulator", {
+  console.info("[LF bridge] employee-request init sent", {
     employees: payload.data.employees.length,
     farms: payload.data.farms.length,
   });
@@ -265,16 +268,92 @@ async function appendFlightsToOutputTable(flights) {
   return validFlights.length;
 }
 
+function requestTextOrDefault(value, fallback) {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function requestDateTime(value) {
+  const source = value && typeof value === "object" ? value : null;
+  const rawDate = source ? source.dateStr : value;
+  const dateStr = String(rawDate ?? "")
+    .split("T")[0]
+    .trim();
+  return {
+    dateStr: dateStr || "1900-01-01",
+    ...(dateStr && source?.timeStr ? { timeStr: String(source.timeStr) } : {}),
+  };
+}
+
+async function appendEmployeeRequestsToOutputTable(requests) {
+  if (requests.length === 0) return 0;
+
+  const existingEmployeeNumbers = LFForm.getFieldValues({ fieldId: 72 });
+  const firstIndex = Array.isArray(existingEmployeeNumbers)
+    ? existingEmployeeNumbers.length
+    : existingEmployeeNumbers == null || existingEmployeeNumbers === ""
+      ? 0
+      : 1;
+
+  await LFForm.addRow({ fieldId: 71 }, requests.length);
+
+  for (let offset = 0; offset < requests.length; offset++) {
+    const request = requests[offset] ?? {};
+    const index = firstIndex + offset;
+    await LFForm.setFieldValues(
+      { fieldId: 72, index },
+      String(request.Employee_Number ?? ""),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 73, index },
+      String(request.FullName ?? ""),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 74, index },
+      requestTextOrDefault(request.Request_Status, "Cancel"),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 75, index },
+      requestTextOrDefault(request.Farm, "TBD"),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 76, index },
+      requestDateTime(request.Preferred_Arrival_By),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 77, index },
+      requestTextOrDefault(request.Flight_Number, "TBD"),
+    );
+    await LFForm.setFieldValues(
+      { fieldId: 78, index },
+      requestDateTime(request.Flight_Arrival),
+    );
+  }
+
+  return requests.length;
+}
+
 window.addEventListener("message", (event) => {
-  if (
-    event.origin !== TABULATOR_ORIGIN ||
-    event.data?.type !== "employee-tabulator:ready" ||
-    !event.source
-  ) {
+  if (event.data?.type !== "employee-tabulator:ready") return;
+
+  if (event.origin !== TABULATOR_ORIGIN || !event.source) {
+    console.warn("[LF bridge] ignored ready message", {
+      origin: event.origin,
+      expectedOrigin: TABULATOR_ORIGIN,
+      hasSource: Boolean(event.source),
+      view: event.data?.view,
+    });
     return;
   }
 
-  if (event.data.view === "employee-request") {
+  const view =
+    event.data.view === "employee-request" ? "employee-request" : "flights";
+  if (!connectedViews.has(view)) {
+    connectedViews.add(view);
+    console.info("[LF bridge] connected", { view });
+  }
+
+  if (view === "employee-request") {
     requestTabulatorWindow = event.source;
     sendEmployeeRequestsToTabulator();
   } else {
@@ -285,6 +364,10 @@ window.addEventListener("message", (event) => {
   if (tabulatorWindow && requestTabulatorWindow && helloTimer !== null) {
     clearInterval(helloTimer);
     helloTimer = null;
+    if (!allConnectionsLogged) {
+      allConnectionsLogged = true;
+      console.info("[LF bridge] all hosted views connected");
+    }
   }
 });
 
@@ -316,7 +399,7 @@ window.addEventListener("message", async (event) => {
   }
 });
 
-window.addEventListener("message", (event) => {
+window.addEventListener("message", async (event) => {
   if (
     event.origin !== TABULATOR_ORIGIN ||
     event.source !== requestTabulatorWindow ||
@@ -326,26 +409,43 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  window.employeeRequestChanges = event.data.requests;
-  console.log(
-    "received employee request updates",
-    window.employeeRequestChanges,
-  );
-  event.source.postMessage(
-    {
-      type: "employee-request:saved",
-      rowsSaved: window.employeeRequestChanges.length,
-    },
-    TABULATOR_ORIGIN,
-  );
+  try {
+    const rowsSaved = await appendEmployeeRequestsToOutputTable(
+      event.data.requests,
+    );
+    console.info("[LF bridge] employee requests saved", { rowsSaved });
+    event.source.postMessage(
+      { type: "employee-request:saved", rowsSaved },
+      TABULATOR_ORIGIN,
+    );
+  } catch (error) {
+    console.error("[LF bridge] could not save employee requests", error);
+    event.source.postMessage(
+      {
+        type: "employee-request:save-error",
+        message: error instanceof Error ? error.message : String(error),
+      },
+      TABULATOR_ORIGIN,
+    );
+  }
 });
 
 function sendHelloToTabulatorFrames() {
+  if (!helloScanLogged) {
+    helloScanLogged = true;
+    console.info("[LF bridge] sending hello to child frames", {
+      frameCount: window.parent.frames.length,
+    });
+    if (window.parent.frames.length === 0) {
+      console.warn("[LF bridge] no child frames found for handshake");
+    }
+  }
+
   for (let index = 0; index < window.parent.frames.length; index++) {
     try {
       window.parent.frames[index].postMessage(
         { type: "employee-tabulator:hello" },
-        TABULATOR_ORIGIN,
+        "*",
       );
     } catch (error) {
       console.debug("Could not send tabulator hello to frame", index, error);
@@ -358,6 +458,9 @@ helloTimer = setInterval(sendHelloToTabulatorFrames, 250);
 
 LFForm.onFieldChange(
   () => {
+    if (!employeeTableReady) {
+      console.info("[LF bridge] employee table ready");
+    }
     employeeTableReady = true;
     sendTableToTabulator();
     sendEmployeeRequestsToTabulator();
@@ -367,6 +470,9 @@ LFForm.onFieldChange(
 
 LFForm.onFieldChange(
   () => {
+    if (!flightLookupReady) {
+      console.info("[LF bridge] flight lookup ready");
+    }
     flightLookupReady = true;
     sendTableToTabulator();
   },
@@ -375,25 +481,11 @@ LFForm.onFieldChange(
 
 LFForm.onFieldChange(
   () => {
+    if (!farmTableReady) {
+      console.info("[LF bridge] farm table ready");
+    }
     farmTableReady = true;
     sendEmployeeRequestsToTabulator();
   },
   { fieldId: 70 },
 );
-
-window.addEventListener("message", (event) => {
-  console.log("message diagnostic", {
-    type: event.data?.type,
-    origin: event.origin,
-    fromParent: event.source === window.parent,
-  });
-});
-
-window.addEventListener("message", (event) => {
-  console.log("bridge diagnostic", {
-    origin: event.origin,
-    type: event.data?.type,
-    fromParent: event.source === window.parent,
-    data: event.data,
-  });
-});
