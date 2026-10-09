@@ -304,7 +304,7 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       editorParams: { values: ['', ...farms] },
     },
     {
-      title: 'Requested Arrival',
+      title: 'Req. Arrival/Departure',
       field: 'Preferred_Arrival_By',
       minWidth: 155,
       widthGrow: 1.2,
@@ -603,13 +603,16 @@ function App() {
         const rowData = cell.getRow().getData()
         if (viewMode.current === 'employee-request') {
           const field = cell.getField()
-          const requestStatus = String(rowData.Request_Status ?? '')
-          if (LOCKED_REQUEST_STATUSES.has(requestStatus)) return false
+          const requestStatus = String(rowData.Request_Status ?? '').trim()
+          const isBooked = LOCKED_REQUEST_STATUSES.has(requestStatus)
           if (field === 'Request_Status') {
-            return Object.hasOwn(REQUEST_STATUS_TRANSITIONS, requestStatus)
+            return !isBooked && Object.hasOwn(REQUEST_STATUS_TRANSITIONS, requestStatus)
           }
-          return Boolean(rowData.Request_Status) &&
-            ['Farm', 'Preferred_Arrival_By'].includes(field)
+          if (field === 'Farm') return Boolean(requestStatus)
+          if (field === 'Preferred_Arrival_By') {
+            return Boolean(requestStatus) && !isBooked
+          }
+          return false
         }
         return column.editable !== false && !rowData.__lfLocked
       },
