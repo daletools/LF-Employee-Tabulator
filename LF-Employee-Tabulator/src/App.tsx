@@ -241,6 +241,15 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       field: 'Request_Status',
       minWidth: 135,
       widthGrow: 1.1,
+      editor: 'list',
+      editorParams: {
+        values: {
+          '': 'Blank',
+          Requested: 'Requested',
+          'Flight Booked': 'Flight Booked',
+          Arrived: 'Arrived',
+        },
+      },
     },
     {
       title: 'Farm',
@@ -549,7 +558,10 @@ function App() {
       editable: (cell: { getRow: () => RowComponent; getField: () => string }) => {
         const rowData = cell.getRow().getData()
         if (viewMode.current === 'employee-request') {
-          return ['Farm', 'Preferred_Arrival_By'].includes(cell.getField())
+          const field = cell.getField()
+          if (field === 'Request_Status') return true
+          return Boolean(rowData.Request_Status) &&
+            ['Farm', 'Preferred_Arrival_By'].includes(field)
         }
         return column.editable !== false && !rowData.__lfLocked
       },
