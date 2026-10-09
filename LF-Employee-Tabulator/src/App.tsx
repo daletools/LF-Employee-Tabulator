@@ -203,6 +203,58 @@ function flightNumberEditor(
   return input
 }
 
+const REQUEST_STATUS_TRANSITIONS: Record<string, string[]> = {
+  '': ['Requested'],
+  Requested: [''],
+  Arrived: ['Request Return'],
+  'Request Return': ['Arrived'],
+}
+const LOCKED_REQUEST_STATUSES = new Set(['Flight Booked', 'Return Flight Booked'])
+
+function requestStatusEditor(
+  cell: CellComponent,
+  onRendered: (callback: () => void) => void,
+  success: (value: unknown) => boolean,
+  cancel: (value: unknown) => void,
+): HTMLSelectElement {
+  const currentStatus = String(cell.getValue() ?? '')
+  const select = document.createElement('select')
+  const values = [currentStatus, ...(REQUEST_STATUS_TRANSITIONS[currentStatus] ?? [])]
+  let completed = false
+
+  for (const value of new Set(values)) {
+    const option = document.createElement('option')
+    option.value = value
+    option.textContent = value || 'Blank'
+    select.append(option)
+  }
+
+  select.value = currentStatus
+  select.style.width = '100%'
+  select.style.height = '100%'
+  select.style.boxSizing = 'border-box'
+
+  const commit = () => {
+    if (completed) return
+    success(select.value)
+    completed = true
+  }
+  const cancelEdit = () => {
+    if (completed) return
+    completed = true
+    cancel(undefined)
+  }
+
+  select.addEventListener('change', commit)
+  select.addEventListener('blur', commit)
+  select.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') commit()
+    if (event.key === 'Escape') cancelEdit()
+  })
+  onRendered(() => select.focus())
+  return select
+}
+
 const GRID_COLUMNS: ColumnDefinition[] = [
   { title: 'Employee number', field: 'Employee_Number', minWidth: 112, widthGrow: 1.1, editable: false },
   { title: 'Full name', field: 'FullName', minWidth: 150, widthGrow: 1.6, editable: false },
@@ -241,15 +293,7 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       field: 'Request_Status',
       minWidth: 135,
       widthGrow: 1.1,
-      editor: 'list',
-      editorParams: {
-        values: {
-          '': 'Blank',
-          Requested: 'Requested',
-          'Flight Booked': 'Flight Booked',
-          Arrived: 'Arrived',
-        },
-      },
+      editor: requestStatusEditor,
     },
     {
       title: 'Farm',
@@ -260,7 +304,7 @@ function requestColumns(farms: string[]): ColumnDefinition[] {
       editorParams: { values: ['', ...farms] },
     },
     {
-      title: 'Preferred arrival by',
+      title: 'Requested Arrival',
       field: 'Preferred_Arrival_By',
       minWidth: 155,
       widthGrow: 1.2,
@@ -559,7 +603,11 @@ function App() {
         const rowData = cell.getRow().getData()
         if (viewMode.current === 'employee-request') {
           const field = cell.getField()
-          if (field === 'Request_Status') return true
+          const requestStatus = String(rowData.Request_Status ?? '')
+          if (LOCKED_REQUEST_STATUSES.has(requestStatus)) return false
+          if (field === 'Request_Status') {
+            return Object.hasOwn(REQUEST_STATUS_TRANSITIONS, requestStatus)
+          }
           return Boolean(rowData.Request_Status) &&
             ['Farm', 'Preferred_Arrival_By'].includes(field)
         }
@@ -749,7 +797,7 @@ function App() {
         <div>
           <p className="eyebrow">DIRECTORY <span>/</span> {viewMode.current === 'employee-request' ? 'REQUESTS' : 'RECORDS'}</p>
           <h1>{viewMode.current === 'employee-request' ? 'Employee requests' : 'Employee records'}</h1>
-          <p className="subheading">{viewMode.current === 'employee-request' ? 'Manage employee hiring requests.' : 'Review, update, and return changes to your form.'}</p>
+          <p className="subheading">{viewMode.current === 'employee-request' ? 'Manage employee hiring requests. This form allows read/write for Request Status, Farm, and Requested Arrival, but is read only for employee and flight data.' : 'Review, update, and return changes to your form.'}</p>
         </div>
         <div className="record-total"><strong>{rowCount.toLocaleString()}</strong><span>records</span></div>
       </section>
